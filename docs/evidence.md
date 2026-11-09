@@ -6,6 +6,7 @@
 | --- | --- |
 | `resolved-scenario.json` | The scenario after overrides, variation and defaults |
 | `variation.json` | The validated variation, when `--variation` was given |
+| `overrides.json` | The overrides as given, when `--overrides` was given |
 | `trace.jsonl` | The append-only world trace, one canonical `TraceEntry` per line |
 | `final-state.json` | The final evaluator snapshot |
 | `usage.json` | Wall-clock `seconds` measured by the runner, plus the agent's model `calls`, tokens and `cost_usd`, and the operator persona's own under `operator` (zero for a scripted operator or a replay). Null means not measured, never zero |
@@ -18,7 +19,7 @@ The trace and resolved scenario are privileged: they may contain private simulat
 
 ## Provenance
 
-`provenance.json` ties the resolved setup and seed to the backend code and adapter metadata. Content hashes identify exact bytes even in a dirty checkout; `git_commit` carries a `-dirty` suffix when the work tree differs from HEAD. The backend hash covers `uv.lock` as well as source. Built-in adapters are covered by the backend hash; external connectors report their own identity. A caller-supplied adapter has a class identity and `adapter.code: null`.
+`provenance.json` ties the resolved setup and seed to the backend code and adapter metadata. Content hashes identify exact bytes even in a dirty checkout; `git_commit` carries a `-dirty` suffix when the work tree differs from HEAD. When Overnight runs from a checkout (`.venv/bin/overnight` after `uv sync`, or an editable install), the backend hash covers `pyproject.toml` and `uv.lock` as well as source. A non-editable install such as `uv tool install ".[acp]"` has no checkout to read: `git_commit` is null and the hash covers the installed source only. Built-in adapters are covered by the backend hash; external connectors report their own identity. A caller-supplied adapter has a class identity and `adapter.code: null`.
 
 Overnight owns provenance. The core records the scenario, seed and its own code. A connector records the connector and runtime it launched and the model it configured, in the file named by `OVERNIGHT_PROVENANCE_PATH`. The native harness never sees this file. The model is the configured one, not one observed from model calls. A plain command wrapper may write the same file. This sidecar is separate from agent actions and never appears in observations. Missing metadata stays unavailable; malformed metadata invalidates the run. Credentials and the process environment are never recorded. `operator` is `{"kind": "scripted"}`, or for a persona its `transport` (`model`, `recorded` or `qa`), `provider`, `configured_model`, the `model` and `settings` a provider reported (null when no model answered) and `prompt_version`. Provenance is an audit receipt, not a promise of deterministic model replay. Snapshots support inspection, not restart.
 

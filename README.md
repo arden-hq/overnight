@@ -26,7 +26,7 @@ overnight run examples/catering-chaos.json --out .local/runs/catering-chaos
 overnight inspect .local/runs/catering-chaos --kind result --limit 5
 ```
 
-`catering-chaos` uses five services. It has delayed replies, operator approvals, an outage and a retry, dependent events and protected unrelated data. `run` writes the resolved scenario, trace, final state, verdict and provenance into a new directory. It refuses a directory that already exists.
+`catering-chaos` uses five services. It has delayed replies, operator approvals, an outage and a retry, dependent events and protected unrelated data. `run` writes the resolved scenario, trace, final state, verdict and provenance into a new directory. It refuses a directory that already exists, and checks the operator model key before creating it.
 
 You can change the setup with `--overrides examples/catering-overrides.json`. You can add seeded noise and adversity with `--variation examples/catering-adversarial-variation.json`.
 
@@ -72,7 +72,7 @@ The open-harness suite runs Pi, OpenCode and Prime on the same hard cases. Each 
    overnight suite validate .local/suites/open/suite.json
    ```
 
-   Every arm runs GPT-6 Luna through OpenRouter and reads `OPENROUTER_API_KEY`. To use another OpenAI-compatible endpoint, pass `--base-url`, `--api-key-env` (the name of the variable holding its key) and, if the endpoint needs one, `--reasoning-effort` ([model providers](docs/harness-integration.md#model-providers)). The operator persona of the live cases uses the same provider and model. `--arm` and `--case` pick a subset.
+   Every arm runs GPT-6 Luna through OpenRouter and reads `OPENROUTER_API_KEY`. To use another OpenAI-compatible endpoint, pass `--base-url`, `--api-key-env` (the name of the variable holding its key) and, if the endpoint needs one, `--reasoning-effort` ([model providers](docs/harness-integration.md#model-providers)). The operator persona of the catering and shared-world cases uses the same provider and model; the native fixtures use a scripted operator. `--arm` and `--case` pick a subset.
 
 3. Run it. This calls a real model and spends money.
 
@@ -92,9 +92,9 @@ cd ui && npm run dev           # both at once
 
 The workbench lists scenarios from `examples/` and saved runs from `.local/runs/`. It shows a run on a timeline with its checks and evidence. It edits scenarios, starts and stops scripted runs, and compares two runs at their first difference.
 
-The API binds to 127.0.0.1 only. It refuses other Host headers and cross-site writes. Saves are validated before they are written. By default only scripted runs start; `serve --allow-live` also allows command and harness agents, which may call a live model. Stopping a run, or the server, ends the run and every agent session it started.
+The API binds to 127.0.0.1 only. It refuses other Host headers and cross-site writes. Saves are validated before they are written. By default only scripted agents with a scripted operator start; `serve --allow-live` also allows command and harness agents and persona operators, which may call a live model. The workbench does not replay recorded operator answers, so a persona scenario started there calls its model and needs its key. To replay one, such as `examples/shared-world-chaos.json`, run `overnight run --operator-answers ... --out .local/runs/<name>` and open the run in the workbench. Stopping a run, or the server, ends the run and every agent session it started.
 
-After changing an API response model, run `npm run gen:api` in `ui/` to regenerate the TypeScript types. `npm run check:api` verifies them.
+`npm run dev` starts the repository's `.venv/bin/overnight` when it exists, and otherwise `overnight` on PATH. After changing an API response model, run `npm run gen:api` in `ui/` to regenerate the TypeScript types; it reads the schema from the repository venv, so run `uv sync --extra acp` first. `npm run check:api` verifies them.
 
 ## Exit codes
 
@@ -105,6 +105,7 @@ After changing an API response model, run `npm run gen:api` in `ui/` to regenera
 | 2 | `unknown`: a bound was reached or work is still pending |
 | 3 | `invalid`: the scenario is invalid, or the run failed before it could be graded |
 | 4 | Runtime or infrastructure error |
+| 64 | Usage or configuration error: a bad option, an existing `--out` or a missing operator model key. Nothing is run or written |
 
 ## Connectors
 
@@ -115,14 +116,14 @@ A native harness runs as `agent.kind: "harness"`. It talks to Overnight over one
 | [Pi](connectors/pi/README.md) | Pi over ACP | Runs in the `overnight-pi` image; no scheduler |
 | [OpenCode](connectors/opencode/README.md) | Pinned OpenCode over ACP | Runs in the `overnight-opencode` image; native children, steering |
 | [Prime](connectors/prime/README.md) | Prime Agent over ACP | Runs in the `overnight-prime` image; native jobs through a pinned evaluation-runtime patch |
-| [Arden](connectors/arden/README.md) | Arden server and scheduler | Runs on the host; native Automations on the world clock |
+| [Arden](connectors/arden/README.md) | Arden server and scheduler | Needs access to the Arden source: a built Arden checkout and a local Codex login. Runs on the host; native Automations on the world clock |
 | [Feather](connectors/feather/README.md) | Pinned Feather SDK | Runs on the host; `uv sync --extra feather` |
 
 `scripts/` prepares harness cases without running a model. Native runs call real models and need provider keys in the environment. A harness runs in a container, or on the host only when its scenario sets `run_on_host: true`. See [isolation](docs/harness-integration.md#isolation).
 
 ## Architecture
 
-- The operator is the user: it sends messages, answers the agent's reports, decides approvals and controls execution policy. Live cases play it with an AI persona and a private brief; examples without a model use a scripted one.
+- The operator is the user: it sends messages, answers the agent's reports, decides approvals and controls execution policy. The common live cases play it with an AI persona and a private brief. Examples without a model, and the native fixtures that test a harness against a fixed decision, use a scripted one.
 - The agent proposes operations through an adapter. The runner binds its identity.
 - The world owns services, people, state, time, faults and events. Service handlers are pure and do no I/O.
 - Adapters own subprocesses, transport and file I/O.
@@ -160,7 +161,7 @@ uv sync --extra acp
 .venv/bin/ty check src/overnight
 ```
 
-None of these call a model. See [test scope](docs/test-scope.md) for connector and UI checks, and [AGENTS.md](AGENTS.md) for contributor rules.
+None of these call a model or start Docker. See [test scope](docs/test-scope.md) for connector, container and UI checks, and [AGENTS.md](AGENTS.md) for contributor rules.
 
 ## License
 

@@ -32,7 +32,10 @@ and records binary/source hashes; the bootstrapped kernel is not a locked depend
 
 `options.provider` is `openrouter` (key in `OPENROUTER_API_KEY`) or an OpenAI-compatible
 endpoint ([model providers](../../docs/harness-integration.md#model-providers)). The key stays in
-the connector's relay; Prime receives a run-local relay credential. For a configured endpoint the
+the connector's relay; Prime receives a run-local relay credential. The relay runs in the
+agent container as the same user, so a native shell can still read the key from the connector's
+process environment and call the provider directly: `max_requests` and `max_cost_usd` bound a
+cooperative agent, not an adversarial one ([isolation](../../docs/harness-integration.md#isolation)). For a configured endpoint the
 relay posts to `{base_url}/chat/completions` with `max_completion_tokens`, drops OpenRouter-only
 fields, and sends the endpoint's `reasoning_effort` when set. On the host this is a trusted local
 integration, not a sandbox.
@@ -122,6 +125,9 @@ The probe uses GPT-6 Luna; generated options use conservative $0.20/$0.75 per-mi
 input/output rates, 12 requests, 2,048 output tokens and a 262,144-byte request limit.
 Verify rates before changing models. `PrimeOptions` rejects limits above the configured
 cost estimate; this is a request/token bound, not provider-side prepaid credit enforcement.
+Prime reaches the provider through Overnight's shared loopback relay
+(`overnight.adapters.provider_relay`, shared with OpenCode), which holds the key and refuses an
+excess request with 429 before it is sent ([budget bounds](../../docs/harness-integration.md#run-the-common-hard-cases)).
 
 The case checks retained memory, two reads within one Python execution, one refused deletion,
 and a subsequent permitted message. Besides the world verdict, check native quiescence and

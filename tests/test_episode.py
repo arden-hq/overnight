@@ -718,6 +718,53 @@ def test_a_world_notification_reaches_each_open_chat_once():
     assert mail_a == mail_b
 
 
+def test_an_order_cancelled_in_one_chat_notifies_the_agents_other_chat_only():
+    doc = copy.deepcopy(BASE)
+    doc["actors"][1]["read_services"] = ["mail", "shop"]
+    doc["actors"][1]["operations"] = {"shop": ["cancel_order"]}
+    shop = {
+        "catalog": [{"id": "lunch", "title": "Lunch", "price_cents": 900}],
+        "orders": [
+            {
+                "id": "original",
+                "item_id": "lunch",
+                "buyer_id": "agent",
+                "quantity": 1,
+                "total_cents": 900,
+                "status": "confirmed",
+                "placed_at": 0,
+            }
+        ],
+    }
+    doc["services"].append({"id": "shop", "kind": "shop", "state": shop})
+    doc["tasks"] = [task("cancel", "chat-a", "Cancel"), task("audit", "chat-b", "Audit")]
+    cancel = {
+        "kind": "invoke",
+        "id": "cancel",
+        "service_id": "shop",
+        "operation": "cancel_order",
+        "args": {"order_id": "original"},
+    }
+    adapters = {
+        "chat-a": RecordingAdapter([{"kind": "wait", "until": 2}, cancel, {"kind": "done"}]),
+        "chat-b": RecordingAdapter([{"kind": "wait", "until": 9}, {"kind": "done"}]),
+    }
+    result = run_scenario(resolve_scenario(doc), adapters=adapters)
+    assert result.status == "done"
+    seen = {
+        chat: [
+            (note["kind"], note["ref"], note["summary"], note["chat_id"])
+            for item in adapter.observations[1:]
+            for note in item["notifications"]
+        ]
+        for chat, adapter in adapters.items()
+    }
+    assert seen == {
+        "chat-a": [],
+        "chat-b": [("order_changed", "original", "Order original cancelled", "chat-b")],
+    }
+
+
 def test_an_idle_task_completes_at_its_deadline_or_when_its_chats_successor_is_due():
     from test_runtime import VENDOR, ScriptedHarness, vendor_mail
 

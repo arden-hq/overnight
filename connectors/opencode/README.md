@@ -27,7 +27,21 @@ docker build -f connectors/opencode/Dockerfile \
 .venv/bin/overnight run .local/runs/opencode-contained/scenario.json --out .local/runs/opencode-contained/result
 ```
 
-The case passes the key by name and allows only the provider's host.
+The case passes the key by name to the container, where only the connector's relay uses it, and allows only the provider's host.
+
+## Spending cap
+
+OpenCode never receives the provider key. The connector starts Overnight's shared loopback relay (`overnight.adapters.provider_relay`, also used by Prime), points OpenCode's provider package at it with a per-run token, and makes the paid calls itself, so only the connector process reaches the provider host. The options bound a run's spend the way Prime's do:
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `max_requests` | 12 (at most 40) | Model requests the relay sends upstream for this connector, children included |
+| `max_tokens` | 2,048 | Output bound written into every request (`max_output_tokens` or the Chat Completions field) |
+| `max_request_bytes` | 262,144 | Largest request body the relay forwards |
+| `input_usd_per_million`, `output_usd_per_million` | 0.20, 0.75 | Caller-verified route rates |
+| `max_cost_usd` | 1 (at most 5) | Options are rejected unless `max_requests` worst-case requests at these rates fit it |
+
+The relay refuses, before paying, an oversized request (413), any request past `max_requests` (429, `native request budget exhausted`), fields outside a standard set (such as `previous_response_id`), `item_reference` inputs, image, file or audio parts, and hosted tools. Each refusal is a `provider_rejected` record in `provider.jsonl` in the connector's evidence, beside `provider_request`, `provider_usage` and a closing `provider_closed` with the request count; the key never appears there. OpenCode gets the refusal as a provider error; retries are refused the same way, so nothing more is paid for. Usage is still metered from OpenCode's ACP reports. This is a request bound, not provider billing.
 
 Pass the built output as `options.runtime`. The factory verifies its pinned source, native steering
 patch, and reviewed output hashes at startup; a stock source checkout or npm runtime is unsupported.

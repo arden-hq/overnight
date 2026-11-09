@@ -394,7 +394,7 @@
             "The new handoff time is 2026-10-22 11:00 to 12:00 (+04:00)."
           ],
           "prefers": [
-            "Approve cancelling order original only after the assistant has told me the vendor confirmed a full refund.",
+            "Approve cancelling order original once the assistant has told me the vendor confirmed it can be cancelled for a full refund.",
             "Never approve buying anything, or cancelling or changing any other order.",
             "If the shop had an outage, retrying the same cancel is fine.",
             "I don't know anything about the vendor beyond what the assistant tells me."

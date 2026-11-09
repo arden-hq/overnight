@@ -21,8 +21,18 @@ Prefer representative shared-schema cases over per-field, per-default or per-exa
 | Suites and statistics | `tests/test_suite.py` |
 | Evidence and workbench | `tests/test_provenance.py`, `tests/test_inspection.py`, `tests/test_workbench.py` |
 | Connectors | `connectors/<name>/test_contracts.py`, `connectors/feather/test_scrub.py`, `connectors/arden/*.test.mjs` |
+| Container isolation | `tests/test_container.py` (opt-in, see below) |
 
 ## Run
+
+The connector tests import the connector packages, and Feather's also needs its extra. Install them once:
+
+```sh
+uv sync --extra acp --extra feather
+uv pip install --python .venv/bin/python --no-deps -e ./connectors/opencode -e ./connectors/prime -e ./connectors/feather
+```
+
+Then run the checks with `.venv/bin`, since a later plain `uv sync` removes the editable connectors:
 
 ```sh
 .venv/bin/pytest -q tests connectors/opencode/test_contracts.py connectors/prime/test_contracts.py connectors/feather/test_scrub.py
@@ -31,6 +41,12 @@ Prefer representative shared-schema cases over per-field, per-default or per-exa
 .venv/bin/ruff format --check src tests examples scripts connectors
 .venv/bin/ty check src/overnight
 (cd ui && npm run build && npm run check:api)
+```
+
+`tests/test_container.py` starts real Docker containers, so it is skipped unless `OVERNIGHT_CONTAINER_TESTS=1` is set and the `overnight-agent-base` image exists. Its leftover checks cover only containers and networks the test process started, so other Overnight runs on the host do not affect it. One test also needs internet access to reach its allowed host.
+
+```sh
+OVERNIGHT_CONTAINER_TESTS=1 .venv/bin/pytest -q tests/test_container.py
 ```
 
 None of these call a model. Live model or native-harness runs are separate and need explicit authorization.

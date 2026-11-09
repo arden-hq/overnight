@@ -6,7 +6,7 @@ Add `tasks` to a scenario. Each task has a unique `id`, an explicit `chat_id`, a
 
 A task is `pending` until it starts, then `active`. A harness task whose native turn ended is `idle`: it is observed again only when a notification for its chat exists or its native wake comes. An idle task completes as `done` when its deadline arrives, when the next task in its chat is due, or when no task is active and nothing scheduled (an event, reminder, operator step or task start) can reach any idle task before its deadline or the horizon. An active task that reaches its deadline becomes `deadline`. A task that ends leaves nothing behind in its chat: its open `wait_for_notification` calls time out, and the harness's pending work and native wake are cancelled, so none of it reaches the chat's next task.
 
-Each task start opens its chat's notification inbox: notifications posted before the start are not offered to it. An operator message for a task that has not started is in the chat's transcript at once and becomes a notification when the task starts, unless the task resets the chat's memory.
+Each task start opens its chat's notification inbox: notifications posted before the start are not offered to it. An operator message for a task that has not started is in the chat's transcript at once and becomes a notification when the task starts, unless the task resets the chat's memory. The agent's own write in one chat can notify its other open chats, never the chat that made it; for example, an order cancelled in one chat reaches a chat waiting for that cancellation (see [services](services.md#notifications)).
 
 Each agent observation contains:
 

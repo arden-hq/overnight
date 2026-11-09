@@ -9,16 +9,16 @@ from pathlib import Path
 import httpx
 
 from overnight.adapters.config import Factory, Launch, SessionContext
-from overnight.adapters.evidence import source_identity
+from overnight.adapters.evidence import UsageMeter, source_identity
 from overnight.adapters.files import write_private_json
 from overnight.adapters.http import serve_http
 from overnight.adapters.provider import api_key, provider_record
 from overnight.adapters.provider import endpoint as provider_endpoint
+from overnight.adapters.provider_relay import ProviderRelay
 from overnight.execution.harness import Capabilities
 from overnight.execution.provenance import ModelConfiguration
 from overnight_prime.lifecycle import NativeLifecycle, require_evaluation_build
 from overnight_prime.options import PrimeOptions
-from overnight_prime.provider import ProviderRelay
 from overnight_prime.runtime import NativeRuntime, native_environment
 from overnight_prime.skills import verify_python_skills
 
@@ -99,7 +99,15 @@ async def prepare(context: SessionContext) -> Launch:
     os.close(descriptor)
     try:
         client = await stack.enter_async_context(httpx.AsyncClient(timeout=90))
-        relay = ProviderRelay(options, api_key(provider_endpoint(options.provider)), client, record)
+        relay = ProviderRelay(
+            options,
+            options.provider,
+            options.model,
+            api_key(provider_endpoint(options.provider)),
+            client,
+            record,
+            UsageMeter(),
+        )
         endpoint = await stack.enter_async_context(serve_http(relay.app))
         write_private_json(
             agent / "models.json",

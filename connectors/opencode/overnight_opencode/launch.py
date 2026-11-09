@@ -2,9 +2,13 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import shutil
+from collections.abc import Awaitable, Callable
+from contextlib import AsyncExitStack
 from pathlib import Path
 
+import httpx
 from acp.core import ClientSideConnection
 from pydantic import BaseModel
 
@@ -16,8 +20,10 @@ from overnight.adapters.config import (
     SessionContext,
 )
 from overnight.adapters.evidence import source_identity
+from overnight.adapters.http import serve_http
 from overnight.adapters.protocol import Steer
 from overnight.adapters.provider import api_key, endpoint, provider_record
+from overnight.adapters.provider_relay import ProviderRelay
 from overnight.execution.harness import Capabilities, HarnessStatus
 from overnight.execution.provenance import ModelConfiguration
 from overnight_opencode.native import OpenCodeClient
@@ -58,6 +64,9 @@ PATCHED_FILES = [
 # or Anthropic Messages routes may reject tool calls or make every tool field required.
 OPENROUTER_PACKAGE = "@opencode/ai/providers/openrouter"
 COMPATIBLE_PACKAGE = "@opencode/ai/providers/openai-compatible-responses"
+# OpenCode reaches the provider only through the connector's loopback relay, which holds the key
+# and bounds paid requests. OpenCode gets the relay's per-run token in this variable.
+RELAY_KEY_ENV = "OVERNIGHT_OPENCODE_PROXY_KEY"
 
 
 def _provider_settings(options: OpenCodeOptions) -> dict[str, str]:
@@ -187,14 +196,47 @@ async def prepare(context: SessionContext) -> Launch:
     config = root / "config"
     for directory in (workspace, config, root / "data", root / "cache", root / "state"):
         directory.mkdir(mode=0o700)
-
-    provider = endpoint(options.provider)
-    secret = api_key(provider)
-    settings = _settings(context, options)
+    secret = api_key(endpoint(options.provider))
     skills = root / "skills"
     skills.mkdir(mode=0o700)
     _link_skills(skills, options)
 
+    def record(value):
+        with (root / "provider.jsonl").open("a") as output:
+            output.write(json.dumps(value) + "\n")
+
+    os.close(os.open(root / "provider.jsonl", os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+    stack = AsyncExitStack()
+    try:
+        client = await stack.enter_async_context(httpx.AsyncClient(timeout=90))
+        relay = ProviderRelay(
+            options, options.provider, options.upstream_model, secret, client, record
+        )
+        relay_url = await stack.enter_async_context(serve_http(relay.app))
+
+        async def close():
+            record({"kind": "provider_closed", "requests": relay.requests})
+            await stack.aclose()
+
+        return _launch(context, options, (command, runtime, version), relay_url, relay.token, close)
+    except BaseException:
+        await stack.aclose()
+        raise
+
+
+def _launch(
+    context: SessionContext,
+    options: OpenCodeOptions,
+    native: tuple[list[str], Path, str],
+    relay_url: str,
+    relay_token: str,
+    close: Callable[[], Awaitable[None]],
+) -> Launch:
+    command, runtime, version = native
+    root = context.directory
+    workspace = root / "workspace"
+    config = root / "config"
+    settings = _settings(context, options, relay_url + "/v1")
     environment = {
         "HOME": str(root),
         "XDG_CONFIG_HOME": str(root / "config-home"),
@@ -205,7 +247,7 @@ async def prepare(context: SessionContext) -> Launch:
         "OPENCODE_CONFIG_CONTENT": json.dumps(settings, separators=(",", ":")),
         "OPENCODE_DISABLE_AUTOUPDATE": "1",
         "OPENCODE_DISABLE_MODELS_FETCH": "1",
-        provider.api_key_env: secret,
+        RELAY_KEY_ENV: relay_token,
     }
     lifecycle = OpenCodeLifecycle()
 
@@ -230,6 +272,7 @@ async def prepare(context: SessionContext) -> Launch:
         wait_for_activity=lifecycle.wait_for_activity,
         cancel=lifecycle.cancel,
         reset=lifecycle.reset,
+        close=close,
         instructions=(
             "OpenCode starts in a private workspace and retains its native local tools. "
             "Use the supplied MCP servers for world operations. "
@@ -245,6 +288,9 @@ async def prepare(context: SessionContext) -> Launch:
                 "provider": provider_record(options.provider),
                 **_provider_settings(options),
                 "max_tokens": options.max_tokens,
+                "max_requests": options.max_requests,
+                "max_request_bytes": options.max_request_bytes,
+                "max_cost_usd": options.max_cost_usd,
                 "input_usd_per_million": options.input_usd_per_million,
                 "output_usd_per_million": options.output_usd_per_million,
                 "native": options.native.model_dump(mode="json"),
@@ -253,7 +299,7 @@ async def prepare(context: SessionContext) -> Launch:
     )
 
 
-def _settings(context: SessionContext, options: OpenCodeOptions) -> dict:
+def _settings(context: SessionContext, options: OpenCodeOptions, base_url: str) -> dict:
     permissions = [
         {
             "action": "*",
@@ -274,18 +320,16 @@ def _settings(context: SessionContext, options: OpenCodeOptions) -> dict:
         ),
     ]
     provider, model = options.model.split("/", 1)
-    route = endpoint(options.provider)
     package = OPENROUTER_PACKAGE if options.provider == "openrouter" else COMPATIBLE_PACKAGE
-    key = route.api_key_env
     return {
         "model": options.model,
         "providers": {
             provider: {
                 "package": package,
-                "env": [key],
+                "env": [RELAY_KEY_ENV],
                 "settings": {
-                    "baseURL": route.base_url,
-                    "apiKey": f"{{env:{key}}}",
+                    "baseURL": base_url,
+                    "apiKey": f"{{env:{RELAY_KEY_ENV}}}",
                     **_provider_settings(options),
                 },
                 "models": {

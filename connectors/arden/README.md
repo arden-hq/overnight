@@ -4,7 +4,7 @@ Runs production Arden as an Overnight harness agent. Arden keeps its own loop, a
 
 ## Run
 
-The connector drives a built Arden source checkout (production server, HeadlessClient, MCP and native scheduler). It needs Node, a built checkout and an existing local Codex login; it does not attach to an installed Arden app or touch its database.
+The connector drives a built Arden source checkout (production server, HeadlessClient, MCP and native scheduler). Arden's source is not part of this repository, so running the connector needs access to it. It needs Node, a built checkout and an existing local Codex login; it does not attach to an installed Arden app or touch its database.
 
 ```sh
 .venv/bin/python scripts/prepare_harness_catering.py --harness arden \

@@ -176,10 +176,10 @@ Pi's price inputs are caller-verified route rates. Aggregate request, byte and o
 
 ## Files
 
-- `src/overnight/adapters/`: shared host, protocol, receipt bridge, ACP client, factory contract, evidence and doctor.
+- `src/overnight/adapters/`: shared host, protocol, receipt bridge, ACP client, factory contract, evidence, provider relay and doctor.
 - `connectors/pi/`: separately installable example package plus pinned npm lock; copy/install it outside Overnight to develop independently.
 - `connectors/feather/`: separately installable native Feather integration using the shared host/bridge.
-- `connectors/prime/`: native Prime launch, skills, lifecycle, provider relay and pinned evaluation-runtime patch.
+- `connectors/prime/`: native Prime launch, skills, lifecycle and pinned evaluation-runtime patch.
 - `connectors/arden/`: production Arden control, tool binding, native scheduling and isolated runtime ownership.
 - `connectors/opencode/`: pinned native ACP runtime, builders and patches, child-family ownership and steering hooks.
 

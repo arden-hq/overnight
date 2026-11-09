@@ -24,6 +24,7 @@ class NotificationKind(StrEnum):
     CHAT = "chat_message"
     CALENDAR = "calendar_changed"
     RECORD = "record_changed"
+    ORDER = "order_changed"
     REMINDER = "reminder_due"
     OPERATOR = "operator_message"
 

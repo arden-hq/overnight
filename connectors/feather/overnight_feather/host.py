@@ -11,6 +11,13 @@ from openai import AsyncOpenAI
 from overnight.adapters.evidence import source_identity
 from overnight.adapters.host import serve
 from overnight.adapters.protocol import Lifecycle
+from overnight.adapters.provider import (
+    CompatibleProvider,
+    Provider,
+    api_key,
+    endpoint,
+    provider_record,
+)
 from overnight.execution.harness import LifecycleReply
 from overnight.execution.provenance import (
     CodeIdentity,
@@ -24,7 +31,7 @@ from overnight_feather.session import CAPABILITIES, Connector
 
 async def main(
     model: str,
-    base_url: str,
+    provider: Provider,
     evidence: Path,
     max_tokens: int,
     max_cost: float,
@@ -45,12 +52,16 @@ async def main(
         if native_config
         else NativeOptions()
     )
-    write_provenance(model, max_tokens, pricing, native)
+    route = endpoint(provider)
+    key = api_key(route)
+    # The client holds the key; nothing Feather starts, such as its shell worker, needs it.
+    os.environ.pop(route.api_key_env, None)
+    write_provenance(model, provider, max_tokens, pricing, native)
     namespace = os.environ.get("OVERNIGHT_CHAT_NAMESPACE")
     if namespace is not None:
         evidence = evidence / "chats" / namespace
     async with AsyncOpenAI(
-        api_key=os.environ["OPENROUTER_API_KEY"], base_url=base_url, timeout=120, max_retries=0
+        api_key=key, base_url=route.base_url, timeout=120, max_retries=0
     ) as client:
         connector = Connector(client, model, evidence, max_tokens, max_cost, pricing, native)
 
@@ -74,7 +85,7 @@ async def apply_lifecycle(connector: Connector, message: Lifecycle) -> Lifecycle
 
 
 def write_provenance(
-    model: str, max_tokens: int, pricing: Pricing | None, native: NativeOptions
+    model: str, provider: Provider, max_tokens: int, pricing: Pricing | None, native: NativeOptions
 ) -> None:
     target = os.environ.get("OVERNIGHT_PROVENANCE_PATH")
     if target is None:
@@ -97,6 +108,7 @@ def write_provenance(
         model=ModelConfiguration(
             name=model,
             settings={
+                "provider": provider_record(provider),
                 "native": native.model_dump(mode="json"),
                 "effective_compaction": native.effective_compaction.model_dump(mode="json"),
                 "pricing": (pricing or Pricing()).model_dump(mode="json"),
@@ -114,7 +126,11 @@ def write_provenance(
 
 @click.command()
 @click.option("--model", required=True)
-@click.option("--base-url", default="https://openrouter.ai/api/v1")
+@click.option(
+    "--base-url",
+    help="An OpenAI-compatible endpoint. Without it Feather uses OpenRouter and OPENROUTER_API_KEY.",
+)
+@click.option("--api-key-env", help="The variable holding the --base-url endpoint's key.")
 @click.option("--evidence", type=click.Path(path_type=Path), required=True)
 @click.option("--max-tokens", type=click.IntRange(1, 4096), default=4096)
 @click.option("--max-cost", type=click.FloatRange(min=0, max=5, min_open=True), default=5)
@@ -123,7 +139,8 @@ def write_provenance(
 @click.option("--native-config", type=click.Path(exists=True, path_type=Path))
 def run(
     model: str,
-    base_url: str,
+    base_url: str | None,
+    api_key_env: str | None,
     evidence: Path,
     max_tokens: int,
     max_cost: float,
@@ -134,7 +151,7 @@ def run(
     asyncio.run(
         main(
             model,
-            base_url,
+            _provider(base_url, api_key_env),
             evidence,
             max_tokens,
             max_cost,
@@ -143,3 +160,17 @@ def run(
             native_config,
         )
     )
+
+
+def _provider(base_url: str | None, api_key_env: str | None) -> Provider:
+    """The shared provider contract: the key always comes from the variable named for its host."""
+    if base_url is None:
+        if api_key_env is not None:
+            raise click.UsageError("--api-key-env needs --base-url")
+        return "openrouter"
+    if api_key_env is None:
+        raise click.UsageError("--base-url needs --api-key-env")
+    try:
+        return CompatibleProvider(base_url=base_url, api_key_env=api_key_env)
+    except ValueError as error:
+        raise click.UsageError(str(error)) from None

@@ -4,10 +4,10 @@ import httpx
 import pytest
 from overnight_prime.completion import NAMESPACE, validate_completion
 from overnight_prime.options import PrimeOptions
-from overnight_prime.provider import ProviderRelay
 
 from overnight.adapters.config import NativeTurn
 from overnight.adapters.evidence import UsageMeter
+from overnight.adapters.provider_relay import ProviderRelay
 from overnight.execution.usage import UNMEASURED, ProcessUsage
 
 
@@ -85,7 +85,14 @@ def test_provider_rejects_forged_credentials_and_bounds_paid_requests(provider, 
             max_request_bytes=1024,
         )
         async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as native:
-            relay = ProviderRelay(options, "host-only-secret", native, lambda value: None)
+            relay = ProviderRelay(
+                options,
+                options.provider,
+                options.model,
+                "host-only-secret",
+                native,
+                lambda value: None,
+            )
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=relay.app), base_url="http://relay"
             ) as client:
@@ -149,8 +156,15 @@ def test_a_response_without_usage_makes_totals_unknown(tmp_path, content_type, b
         )
         target = tmp_path / "usage.json"
         async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as native:
-            relay = ProviderRelay(options, "key", native, lambda value: None)
-            relay.meter = UsageMeter(str(target))
+            relay = ProviderRelay(
+                options,
+                options.provider,
+                options.model,
+                "key",
+                native,
+                lambda value: None,
+                UsageMeter(str(target)),
+            )
             relay.meter.add(3, 2, 0.5)
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=relay.app), base_url="http://relay"
@@ -180,8 +194,15 @@ def test_only_a_client_error_is_known_to_be_unbilled(tmp_path, status, cost):
         )
         target = tmp_path / "usage.json"
         async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as native:
-            relay = ProviderRelay(options, "key", native, lambda value: None)
-            relay.meter = UsageMeter(str(target))
+            relay = ProviderRelay(
+                options,
+                options.provider,
+                options.model,
+                "key",
+                native,
+                lambda value: None,
+                UsageMeter(str(target)),
+            )
             relay.meter.add(3, 2, 0.5)
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=relay.app), base_url="http://relay"
@@ -210,8 +231,15 @@ def test_a_request_with_no_answer_makes_totals_unknown(tmp_path):
         )
         target = tmp_path / "usage.json"
         async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as native:
-            relay = ProviderRelay(options, "key", native, lambda value: None)
-            relay.meter = UsageMeter(str(target))
+            relay = ProviderRelay(
+                options,
+                options.provider,
+                options.model,
+                "key",
+                native,
+                lambda value: None,
+                UsageMeter(str(target)),
+            )
             relay.meter.add(3, 2, 0.5)
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=relay.app), base_url="http://relay"

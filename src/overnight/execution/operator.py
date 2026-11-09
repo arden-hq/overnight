@@ -252,6 +252,8 @@ Do not do the assistant's work and do not give it instructions beyond what your 
 Approve an action only when your brief allows it and what the assistant has told you in this chat \
 meets your conditions.
 Otherwise deny it and say why, or ask what you need to know.
+Stay consistent with what you have already said in this chat: if you told the assistant to go \
+ahead with an action, approve that action when it asks.
 If a message needs no answer (a status update, thanks, a final summary you are content with), \
 reply with null.
 Return only JSON: {"message": string|null} for a message, \

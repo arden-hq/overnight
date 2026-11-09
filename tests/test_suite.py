@@ -177,7 +177,7 @@ def test_pairing_separates_a_consistent_gain_that_case_spread_hides():
     assert behind.interval[1] > report.arms[1].interval[0]
 
 
-def test_too_few_cases_tie_instead_of_showing_a_certain_gap():
+def test_too_few_cases_leave_the_comparison_untested_instead_of_showing_a_certain_gap():
     report = report_for(
         {
             "better": [["passed"] * 3] * 4,
@@ -187,7 +187,7 @@ def test_too_few_cases_tie_instead_of_showing_a_certain_gap():
     worse = report.arms[1]
 
     assert worse.interval is None
-    assert worse.versus_leader is not None and worse.versus_leader.tied
+    assert worse.versus_leader is not None and worse.versus_leader.tied is None
     assert worse.versus_leader.interval is None
     assert worse.versus_leader.difference == pytest.approx(-1 / 3)
 

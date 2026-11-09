@@ -1,16 +1,20 @@
 import { spawn } from "node:child_process"
+import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 
 const root = resolve(import.meta.dirname, "../..")
 
-// The API scans run and scenario roots relative to the repository, so it starts there, from the venv
-// (not `uv run`, which may prune dependencies under concurrent commands).
-const api = spawn(resolve(root, ".venv/bin/overnight"), ["serve"], { stdio: "inherit", cwd: root })
+// The API scans run and scenario roots relative to the repository, so it starts there. It uses the
+// repository venv when there is one (not `uv run`, which may prune dependencies under concurrent
+// commands), and otherwise the installed `overnight` command on PATH.
+const venv = resolve(root, ".venv/bin/overnight")
+const overnight = existsSync(venv) ? venv : "overnight"
+const api = spawn(overnight, ["serve"], { stdio: "inherit", cwd: root })
 const web = spawn("npm", ["run", "dev:web"], { stdio: "inherit" })
 const children = [api, web]
 
 api.once("error", (err) => {
-  console.error(`[dev] could not start \`overnight serve\` (${err.message}); is the repository venv installed? The UI will show "could not reach service".`)
+  console.error(`[dev] could not start \`overnight serve\` (${err.message}); is \`overnight\` installed or the repository venv synced? The UI will show "could not reach service".`)
 })
 api.once("exit", (code) => {
   if (code) console.error(`[dev] \`overnight serve\` exited with ${code} (the serve command may not exist yet). Vite keeps running.`)

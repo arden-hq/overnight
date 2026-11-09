@@ -8,10 +8,13 @@ requires-python = ">=3.14,<3.16"
 dependencies = [
     "anyio>=4.11,<5",
     "click>=8.3,<9",
+    "httpx>=0.28,<1",
+    "httpx-sse>=0.4,<1",
     "jsonschema>=4.25,<5",
     "mcp>=1.26,<2",
     "pydantic>=2.12,<3",
     "regex>=2026.9.29",
+    "starlette>=0.47,<2",
     "uvicorn>=0.35,<1",
 ]
 

@@ -15,7 +15,11 @@ from overnight.adapters.workbench import WorkbenchConfig, create_app, response_s
 from overnight.domain.values import json_value
 from overnight.domain.vocabulary import Verdict
 from overnight.execution.inspection import InspectionError, TraceQuery, inspect_trace
-from overnight.execution.operator import OperatorTransport, RecordedTransport
+from overnight.execution.operator import (
+    OperatorTransport,
+    OperatorUnavailable,
+    RecordedTransport,
+)
 from overnight.execution.qa import check_scenario, check_suite, qa_exit_code, render_qa
 from overnight.execution.runtime import run_scenario
 from overnight.execution.scenario import ResolvedScenario, load_json
@@ -24,6 +28,7 @@ from overnight.execution.suite_report import SuiteReport, render_report
 from overnight.execution.variations import VariationConfig, resolve_variant
 
 INFRASTRUCTURE_EXIT_CODE = 4
+USAGE_EXIT_CODE = 64
 
 
 class InfrastructureError(click.ClickException):
@@ -112,6 +117,12 @@ def run(
     resolved = _resolve_input(scenario, overrides, variation_config)
     if resolved.config.operator.persona is None and operator_answers is not None:
         raise click.UsageError("--operator-answers needs a scenario with an operator persona")
+    try:
+        operator_transport = _operator_transport(resolved, operator_answers)
+    except OperatorUnavailable as error:
+        raise click.UsageError(f"{error}; set it or pass --operator-answers") from error
+    if out.exists():
+        raise click.UsageError(f"--out {out} already exists")
     out.mkdir(mode=0o700, parents=True, exist_ok=False)
     signal.signal(signal.SIGTERM, signal.default_int_handler)
     _write_json(out / "resolved-scenario.json", resolved.to_dict())
@@ -124,7 +135,7 @@ def run(
         result = run_scenario(
             resolved,
             agent_folder=out / "agent",
-            operator_transport=_operator_transport(resolved, operator_answers),
+            operator_transport=operator_transport,
         )
         _write_json(
             out / "usage.json",
@@ -402,9 +413,15 @@ def _optional_object(
 def main(argv: list[str] | None = None) -> int:
     try:
         return cli.main(args=argv, prog_name="overnight", standalone_mode=False)
+    except click.UsageError as error:
+        error.show()
+        return USAGE_EXIT_CODE
     except click.ClickException as error:
         error.show()
         return error.exit_code
+    except FileExistsError as error:
+        click.echo(f"Error: {error.filename} already exists", err=True)
+        return USAGE_EXIT_CODE
     except (ValueError, OSError) as error:
         click.echo(f"invalid scenario: {error}", err=True)
         return 3

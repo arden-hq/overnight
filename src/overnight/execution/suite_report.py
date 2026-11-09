@@ -56,7 +56,7 @@ class LeaderComparison(ReportModel):
     leader: str
     difference: float
     interval: tuple[float, float] | None
-    tied: bool
+    tied: bool | None
     swap_flip: float | None
 
 
@@ -213,7 +213,7 @@ def summarize_suite(
                 leader=leader,
                 difference=means[arm.id] - means[leader],
                 interval=interval,
-                tied=interval is None or interval[0] <= 0 <= interval[1],
+                tied=None if interval is None else interval[0] <= 0 <= interval[1],
                 swap_flip=sum(
                     swap_flip(mine, theirs)
                     for mine, theirs in zip(cells, values[leader], strict=True)
@@ -318,5 +318,6 @@ def _versus(arm: ArmReport, leader: str | None) -> str:
         return "leader"
     if arm.versus_leader is None:
         return "n/a"
-    label = "tied" if arm.versus_leader.tied else "behind"
+    tied = arm.versus_leader.tied
+    label = "no interval" if tied is None else "tied" if tied else "behind"
     return f"{label} {arm.versus_leader.difference:+.3f}"

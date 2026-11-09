@@ -1,10 +1,12 @@
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from overnight.execution.container import AGENT_LABEL, OWNER_LABEL
 from overnight.execution.operator import RecordedTransport
 from overnight.execution.runtime import run_scenario
 from overnight.execution.scenario import load_json, resolve_scenario
@@ -16,13 +18,34 @@ IMAGE = "overnight-agent-base"
 
 
 def _image_ready() -> bool:
-    if shutil.which("docker") is None:
+    if os.environ.get("OVERNIGHT_CONTAINER_TESTS") != "1" or shutil.which("docker") is None:
         return False
     found = subprocess.run(["docker", "image", "inspect", IMAGE], capture_output=True, check=False)
     return found.returncode == 0
 
 
-pytestmark = pytest.mark.skipif(not _image_ready(), reason=f"needs Docker and {IMAGE}")
+pytestmark = pytest.mark.skipif(
+    not _image_ready(), reason=f"needs OVERNIGHT_CONTAINER_TESTS=1, Docker and {IMAGE}"
+)
+
+
+def _leftovers(*listing: str) -> str:
+    """Containers or networks this test process started and did not remove."""
+    return subprocess.run(
+        [
+            "docker",
+            *listing,
+            "--quiet",
+            "--filter",
+            f"label={AGENT_LABEL}=1",
+            "--filter",
+            f"label={OWNER_LABEL}={os.getpid()}",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
 
 SNOOP = r"""
 import json, os, sys
@@ -73,13 +96,7 @@ def test_oracle_runs_in_a_container_and_records_its_image(tmp_path):
     isolation = result.provenance["isolation"]
     assert isolation["kind"] == "container" and isolation["image"] == IMAGE
     assert str(isolation["image_id"]).startswith("sha256:")
-    leftover = subprocess.run(
-        ["docker", "ps", "--all", "--quiet", "--filter", "label=overnight.agent=1"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert leftover.stdout.strip() == ""
+    assert _leftovers("ps", "--all") == ""
 
 
 def test_a_contained_agent_cannot_see_checks_or_the_host_environment(tmp_path, monkeypatch):
@@ -203,13 +220,7 @@ def test_the_proxy_reaches_only_allowed_hosts_and_never_the_host(tmp_path):
     assert report["provider"] == 200
     assert report["other"] != 200
     assert report["host_name"] != 200 and report["host_address"] != 200
-    leftovers = subprocess.run(
-        ["docker", "network", "ls", "--quiet", "--filter", "label=overnight.agent=1"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert leftovers.stdout.strip() == ""
+    assert _leftovers("network", "ls") == ""
 
 
 def test_a_start_that_times_out_leaves_no_proxy_or_network(tmp_path):
@@ -229,10 +240,4 @@ def test_a_start_that_times_out_leaves_no_proxy_or_network(tmp_path):
     assert run_scenario(resolve_scenario(document)).verdict["verdict"] == "invalid"
 
     for listing in (["ps", "--all"], ["network", "ls"]):
-        left = subprocess.run(
-            ["docker", *listing, "--quiet", "--filter", "label=overnight.agent=1"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        assert left.stdout.strip() == "", listing
+        assert _leftovers(*listing) == "", listing

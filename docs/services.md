@@ -26,7 +26,9 @@ Sent mail and chat messages become world state immediately; replies from people 
 
 ## Notifications
 
-A handler declares who its write concerns with `context.notify(recipients, kind, ref, summary)`. After the transition commits, the world posts one notification per recipient that has the agent role, is not the invoking actor, and can see the service (it reads it or holds a grant on it). Failed, denied and faulted calls notify no one. A notification's id is derived from its cause (the invocation id, `reminder:<id>` or `operator:<message id>`) and recipient, so posting it again is a no-op. A notification goes to the recipient's chat that last wrote in the same thread (same service and `ref`, such as a chat conversation); with no such chat it has `chat_id: null` and reaches every open chat of the recipient. The `chat_id` of the invocation that caused a notification is trace attribution, not routing.
+A handler declares who its write concerns with `context.notify(recipients, kind, ref, summary)`. After the transition commits, the world posts a notification to each recipient that has the agent role and can see the service (it reads it or holds a grant on it). Failed, denied and faulted calls notify no one. A notification's id is derived from its cause (the invocation id, `reminder:<id>` or `operator:<message id>`), its recipient and, for a copy to the invoker, the chat it goes to, so posting it again is a no-op.
+
+A notification goes to the recipient's chat that last wrote in the same thread (same service and `ref`, such as a chat conversation or a shop order); with no such chat it has `chat_id: null` and reaches every open chat of the recipient. A call never notifies the chat that made it. When the invoker is a recipient and the call came from a chat, the invoker is notified in the chat that last wrote the thread before this call if that is another chat, nowhere if it is the calling chat, and otherwise once in each of its other open chats (each copy with its own id and `chat_id`). A call without a chat (a single-chat trial) never notifies its invoker. The call then makes its chat the invoker's last writer of the thread, so the agent's repeated messages in one conversation from one chat stay out of its other chats; only its first write to a thread from a chat, or a write after another chat last wrote that thread, reaches them.
 
 | Handler | Recipients | Kind | `ref` |
 | --- | --- | --- | --- |
@@ -34,10 +36,11 @@ A handler declares who its write concerns with `context.notify(recipients, kind,
 | `chat.send_message`, `chat.start_conversation` | conversation participants | `chat_message` | conversation id |
 | `calendar.create_event`, `update_event`, `delete_event` | attendees; attendees before and after; attendees before | `calendar_changed` | event id |
 | `records.add_record`, `update_record`, `delete_record` | the record's `visible_to` | `record_changed` | `collection/id` |
+| `shop.cancel_order` | the order's buyer | `order_changed` | order id |
 | a reminder coming due | its owner, in the reminder's chat | `reminder_due` | reminder id |
 | an operator message | the agent, in the message's chat | `operator_message` | message id |
 
-Shop writes act only on the caller's own orders, and `mail.save_draft`, `mail.delete_messages` and reads change nothing anyone else sees, so they notify no one.
+`shop.buy` creates an order without changing a status, and `mail.save_draft`, `mail.delete_messages` and reads change nothing anyone else sees, so they notify no one.
 
 ## System
 

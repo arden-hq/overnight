@@ -9,8 +9,9 @@ from overnight.domain.vocabulary import ActorRole, NotificationKind
 type Inbox = tuple[str, str | None]
 
 
-def notification_id(cause: str, recipient: str) -> str:
-    return "n-" + hashlib.sha256(f"{cause}\0{recipient}".encode()).hexdigest()[:16]
+def notification_id(cause: str, recipient: str, chat_id: str | None = None) -> str:
+    key = f"{cause}\0{recipient}" if chat_id is None else f"{cause}\0{recipient}\0{chat_id}"
+    return "n-" + hashlib.sha256(key.encode()).hexdigest()[:16]
 
 
 @dataclass(frozen=True)
@@ -60,44 +61,71 @@ class NotificationLog:
         summary: str,
         chat_id: str | None = None,
         chats: Mapping[str, str] | None = None,
+        invoker_chat: str | None = None,
     ) -> list[Posted]:
-        """Append one notification per eligible recipient and return the new ones.
+        """Append the notifications for each eligible recipient and return the new ones.
 
-        ``chats`` routes a recipient's notification to one of its chats; other recipients get
-        ``chat_id``.
+        ``chats`` routes a recipient's notification to the chat that last wrote in its thread;
+        other recipients get ``chat_id``. The call never notifies the chat that made it: the
+        invoker is notified only when the call came from ``invoker_chat``, in the thread's chat
+        if another chat last wrote it, else in each of its other open chats (one id per chat).
 
-        The invoker, actors without the agent role, and actors who cannot see the service are
-        dropped. Posting the same cause and recipient again is a no-op."""
+        Actors without the agent role and actors who cannot see the service are dropped.
+        Posting the same cause and recipient again is a no-op."""
         posted: list[Posted] = []
         for recipient in dict.fromkeys(recipients):
             actor = self._actors.get(recipient)
-            if recipient == invoker or actor is None or actor.role != ActorRole.AGENT:
+            if actor is None or actor.role != ActorRole.AGENT:
                 continue
             if service_id is not None and not self._can_see(actor, service_id):
                 continue
-            notification = Notification(
-                id=notification_id(cause, recipient),
-                time=time,
-                kind=kind,
-                service_id=service_id,
-                ref=ref,
-                summary=summary,
-                chat_id=(chats or {}).get(recipient, chat_id),
-            )
-            prior = self._ids.get(notification.id)
-            if prior is not None:
-                if prior.notification.model_dump(exclude={"time"}) != notification.model_dump(
-                    exclude={"time"}
-                ):
-                    raise ValueError(
-                        f"notification {notification.id} was posted with other content"
-                    )
+            if recipient != invoker:
+                targets = [
+                    (notification_id(cause, recipient), (chats or {}).get(recipient, chat_id))
+                ]
+            elif invoker_chat is None:
                 continue
-            entry = Posted(recipient, cause, notification)
-            self._log.append(entry)
-            self._ids[notification.id] = entry
-            posted.append(entry)
+            else:
+                targets = [
+                    (notification_id(cause, recipient, chat), chat)
+                    for chat in self._other_chats(
+                        recipient, invoker_chat, (chats or {}).get(recipient)
+                    )
+                ]
+            for id_, target in targets:
+                notification = Notification(
+                    id=id_,
+                    time=time,
+                    kind=kind,
+                    service_id=service_id,
+                    ref=ref,
+                    summary=summary,
+                    chat_id=target,
+                )
+                prior = self._ids.get(notification.id)
+                if prior is not None:
+                    if prior.notification.model_dump(exclude={"time"}) != notification.model_dump(
+                        exclude={"time"}
+                    ):
+                        raise ValueError(
+                            f"notification {notification.id} was posted with other content"
+                        )
+                    continue
+                entry = Posted(recipient, cause, notification)
+                self._log.append(entry)
+                self._ids[notification.id] = entry
+                posted.append(entry)
         return posted
+
+    def _other_chats(self, actor_id: str, invoker_chat: str, thread_chat: str | None) -> list[str]:
+        """The invoker's chats other than ``invoker_chat`` that its own call concerns."""
+        if thread_chat is not None:
+            return [] if thread_chat == invoker_chat else [thread_chat]
+        return [
+            chat
+            for actor, chat in self._floors
+            if actor == actor_id and chat is not None and chat != invoker_chat
+        ]
 
     def open(self, actor_id: str, chat_id: str | None) -> None:
         inbox = (actor_id, chat_id)

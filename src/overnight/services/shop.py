@@ -6,6 +6,7 @@ from pydantic import Field, model_validator
 
 from overnight.domain.contracts import JsonObject, Nonnegative, Text
 from overnight.domain.models import Actor, Context
+from overnight.domain.vocabulary import NotificationKind
 from overnight.services.common import find_row, next_id
 from overnight.services.operations import NoArguments, OperationSpec, Parameters, Service
 from overnight.services.state import State, distinct
@@ -125,4 +126,7 @@ class Shop(Service[ShopState]):
         item = find_row(state.catalog, lambda item: item.id == row.item_id, "item")
         if item.available is not None:
             item.available += row.quantity
+        context.notify(
+            (row.buyer_id,), NotificationKind.ORDER, row.id, f"Order {row.id} {row.status.value}"
+        )
         return {"order_id": row.id, "status": row.status.value}

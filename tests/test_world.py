@@ -609,21 +609,22 @@ def test_a_reply_goes_to_the_chat_that_last_wrote_in_that_thread():
     vendor = {"conversation_id": "support", "body": "Status update"}
     world.invoke(_call("before", "send_message", vendor, "vendor", "chat"))
     asked = {"conversation_id": "support", "body": "Can it be cancelled?"}
-    world.invoke(
-        _call("ask", "send_message", asked, "agent", "chat").model_copy(
-            update={"chat_id": "catering"}
+    for ask in ("ask", "ask-again"):
+        world.invoke(
+            _call(ask, "send_message", asked, "agent", "chat").model_copy(
+                update={"chat_id": "catering"}
+            )
         )
-    )
     world.invoke(_call("after", "send_message", vendor, "vendor", "chat"))
     causes = {
         chat_id: [note.id for note in world.undelivered("agent", chat_id)]
         for chat_id in ("catering", "venue")
     }
-    before, after = (
+    before, ask, after = (
         next(item["id"] for item in _notification_trace(world) if item["cause"] == cause)
-        for cause in ("before", "after")
+        for cause in ("before", "ask", "after")
     )
-    assert causes == {"catering": [before, after], "venue": [before]}
+    assert causes == {"catering": [before, after], "venue": [before, ask]}
 
 
 def test_a_chat_sees_and_references_only_its_own_results():

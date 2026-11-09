@@ -23,7 +23,12 @@ ARMS: dict[str, tuple[str, JsonObject, JsonObject]] = {
         "overnight-pi",
         {
             "factory": "overnight_pi:adapter",
-            "options": {"runtime": "/opt/pi", "max_requests": 40, "max_cost_usd": 3},
+            "options": {
+                "runtime": "/opt/pi",
+                "max_requests": 40,
+                "max_cost_usd": 3,
+                "native": {"builtin_tools": ["read", "bash", "edit", "write"]},
+            },
         },
         WITHOUT_CLOCK,
     ),
@@ -31,7 +36,7 @@ ARMS: dict[str, tuple[str, JsonObject, JsonObject]] = {
         "overnight-opencode",
         {
             "factory": "overnight_opencode:adapter",
-            "options": {"runtime": "/opt/opencode"},
+            "options": {"runtime": "/opt/opencode", "max_requests": 40, "max_cost_usd": 3},
             "timeout_seconds": 180,
         },
         WITHOUT_CLOCK,

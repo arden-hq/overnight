@@ -366,8 +366,6 @@ class World:
                 cause_id=invocation.cause_id,
             )
         for notice in transition.notices:
-            if invocation.chat_id is not None:
-                self._threads[(invocation.actor_id, service_id, notice.ref)] = invocation.chat_id
             chats = {
                 recipient: chat
                 for recipient in notice.recipients
@@ -384,8 +382,11 @@ class World:
                     ref=notice.ref,
                     summary=notice.summary,
                     chats=chats,
+                    invoker_chat=invocation.chat_id,
                 )
             )
+            if invocation.chat_id is not None:
+                self._threads[(invocation.actor_id, service_id, notice.ref)] = invocation.chat_id
         result = self._record_result(
             invocation, ResultStatus.SUCCEEDED, transition.result, None, event_id
         )

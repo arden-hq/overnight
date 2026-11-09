@@ -327,11 +327,9 @@
   "agent": {
     "kind": "persistent_command",
     "command": [
-      "uv",
-      "run",
-      "python",
-      "examples/adapters/episode_oracle.py",
-      "examples/shared-world-chaos-plan.json"
+      "sh",
+      "-c",
+      "exec \"$OVERNIGHT_PYTHON\" examples/adapters/episode_oracle.py examples/shared-world-chaos-plan.json"
     ]
   },
   "operator": {

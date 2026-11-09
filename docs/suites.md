@@ -34,7 +34,7 @@ The oracle is a fixed script written for the base scenario. When it fails a case
 
 For a scenario whose operator is a persona, the sham probes get an operator that replies to nothing and denies every approval, and no model runs. Its oracle needs recorded answers (`overnight qa --operator-answers TRACE`); without them it is reported `no_oracle`.
 
-Exit code 0 means every probe held, 1 means a defect, 2 means nothing is wrong but no oracle proved the scenario solvable, and 3 means a scenario, suite or variation file could not be read or is invalid. Only a scripted oracle runs by default. `--allow-command` also runs a local command agent as the oracle, and it may call a model. A harness is never run. `suite run` does not enforce QA. These probes catch shortcuts in general; they do not replace a scenario-specific cheating attempt.
+Exit code 0 means every probe held, 1 means a defect, 2 means nothing is wrong but no oracle proved the scenario solvable, 3 means a scenario, suite or variation file could not be read or is invalid, and 64 means a usage error. Only a scripted oracle runs by default. `--allow-command` also runs a local command agent as the oracle, and it may call a model. A harness is never run. `suite run` does not enforce QA. These probes catch shortcuts in general; they do not replace a scenario-specific cheating attempt.
 
 ## Format
 
@@ -65,7 +65,7 @@ out/
 
 Each attempt is one `overnight run` subprocess reading the frozen inputs, with its own directory, ports and agent processes. `--concurrency N` on `suite run` and `suite resume` keeps up to N attempts running at once; the default is 1. Attempts start in order, attempt 1 of every cell first, so a stopped suite leaves arms within about one round of attempts of each other. Nothing limits the provider's request rate, so pick N within your provider's limits. Ctrl-C, SIGTERM or SIGHUP stops every running attempt and its agent, then writes the report. `suite resume` continues from the frozen inputs: it keeps every finished attempt, retries what stayed unscored and has retries left, and starts what never ran. A run the suite stopped mid-way gets a `.stopped` marker next to its directory. It failed nothing, so it may always continue and does not count as a retry. A lock refuses a second process on the same suite. `suite report` recomputes statistics from the attempt directories.
 
-Exit code 0 means every attempt was scored, 4 means some were not, and 3 means the suite could not start: it is invalid, or `--out` already exists. Verdicts do not change the exit code.
+Exit code 0 means every attempt was scored, 4 means some were not, 3 means the suite is invalid, and 64 means a usage error such as an existing `--out`. Verdicts do not change the exit code.
 
 ## Scoring
 
@@ -95,7 +95,7 @@ A case scores the mean of its attempts. An arm's `mean` weights cases equally.
 | `rerun_flip` | Chance that two attempts of the arm disagree on a case. Empty with one attempt per case |
 | `versus_leader.difference` | Arm mean minus leader mean |
 | `versus_leader.interval` | 95% paired bootstrap interval of that difference |
-| `versus_leader.tied` | The interval covers zero |
+| `versus_leader.tied` | The interval covers zero. Null when there is no interval; the table then prints `no interval` |
 | `versus_leader.swap_flip` | Chance that one attempt from each arm disagrees on a case. Close to `rerun_flip` means the arms differ little more than reruns do |
 
 `spend` sums every run an arm paid for, retries included: `seconds`, tokens and `cost_usd`. `seconds` adds each run's own time, so with `--concurrency` above 1 it is more than the wall-clock time. `seconds_per_attempt` divides `seconds` by the attempts that ran, so attempts never started do not lower it; `cost_per_pass` divides cost by passes. One unmeasured run makes that total null, and the table prints `unknown`. The operator persona's spend is kept apart, in `operator_calls` and `operator_cost_usd`, so an arm's cost stays its agent's own.
@@ -106,7 +106,7 @@ The bootstrap resamples cases, then attempts within each case. Arms share case d
 
 Limits:
 
-- Below five cases the report gives no interval and ties every arm: it cannot tell them apart. Tied means that, not that the arms are equal.
+- Below five cases the report gives no interval, so it cannot tell arms apart: `tied` is null and the table prints `no interval` beside the difference. Neither a win nor a tie is claimed.
 - A stopped suite leaves unscored attempts, so usually no arm is ranked. Its counts and per-case outcomes remain.
 - A retry resamples the run, so an agent that crashes or corrupts its own provenance while going wrong replaces that run with a new one and can raise its mean. A forbidden action or collateral damage cannot be erased this way. A false claim followed by a crash can, because a claim is only judged in a finished run. High `retries` in one arm deserves a look at the run logs.
 - Intervals assume cases represent the scenarios you care about. The leader is picked from the same data and comparisons are not corrected for several arms, so treat a narrow win among many arms with care.

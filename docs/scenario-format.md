@@ -71,8 +71,8 @@ An answer applies to the exact request it names, recorded as `operator_answer` w
 
 The operator is one of two kinds; the runner treats both the same:
 
-- **Persona** (`operator.persona`): an AI user that answers every request at its world time, taking no simulated time. Live scenarios use it.
-- **Scripted** (no `persona`): timed `approve`/`deny` steps and no replies to reports. It exists for examples and tests that run without a model.
+- **Persona** (`operator.persona`): an AI user that answers every request at its world time, taking no simulated time. The common live cases use it.
+- **Scripted** (no `persona`): timed `approve`/`deny` steps and no replies to reports. Examples and tests that run without a model use it. So do the native fixtures (`examples/fixtures/native-*.json`) and the ACP probe, which run a live agent against a fixed decision: their approvals are decided on the clock, and the agent's reports go unanswered.
 
 ### Persona
 
@@ -118,7 +118,7 @@ A scripted decision names the request by its content: it applies to the oldest o
 | `persistent_command` | One process for the whole run, one request/response line per turn. Default timeout 300 seconds |
 | `harness` | A native agent harness over the versioned control protocol ([harness integration](harness-integration.md)) |
 
-Command transports share one write/read deadline, a 1 MiB response limit and process-group cleanup. Stderr is for diagnostics. A command or harness agent may set `container` to run in a container that cannot read the scenario; a harness agent must set either `container` or `run_on_host: true`. See [isolation](harness-integration.md#isolation). Without a container, the agent command is trusted local code, not a sandbox.
+Command transports share one write/read deadline, a 1 MiB response limit and process-group cleanup. Stderr is for diagnostics. A command runs without a shell; its environment has `OVERNIGHT_PYTHON`, the runner's own interpreter on the host (`python3` in a container), so a Python agent can import Overnight without a separate environment. A command or harness agent may set `container` to run in a container that cannot read the scenario; a harness agent must set either `container` or `run_on_host: true`. See [isolation](harness-integration.md#isolation). Without a container, the agent command is trusted local code, not a sandbox.
 
 An observation carries `time`, `horizon`, `context`, `world` (the agent's filtered view), `operations` (the authorized tool catalog with JSON schemas, always including `system`), `messages` (the chat's operator transcript, each with its `id`), `notifications`, `receipts` and `policy_revision`. It never contains personas, full state, the trace or checks.
 
@@ -133,7 +133,7 @@ An observation carries `time`, `horizon`, `context`, `world` (the agent's filter
 | `reminder_due` | one of the agent's reminders comes due | reminder id |
 | `operator_message` | the operator sends a message to this chat; `summary` is its text | message id |
 
-The agent's own invocations never notify it, and a failed or denied call notifies no one. A notification is delivered once per chat: by a `wait_for_notification` result, or by the exchange that showed it (a harness reports what it prompted; see [harness integration](harness-integration.md)). A world notification (`chat_id: null`) reaches every chat of the agent that is open when it is posted.
+A call never notifies the chat that made it (the agent's other chats can get it, as [services](services.md#notifications) describes), and a failed or denied call notifies no one. A notification is delivered once per chat: by a `wait_for_notification` result, or by the exchange that showed it (a harness reports what it prompted; see [harness integration](harness-integration.md)). A notification with `chat_id: null` reaches every chat of the agent that is open when it is posted.
 
 The agent answers with one action:
 
@@ -191,6 +191,7 @@ Checks are never shown to the agent. `done` alone cannot pass a run.
 | `invalid` | The run failed before a grade could mean anything (see below) | 3 |
 | invalid scenario | Detected before the run (`invalid scenario: ...`); nothing is executed | 3 |
 | runtime error | Transport or artifact failure outside the verdict (`runtime error: ...`) | 4 |
+| usage error | A bad option, an existing `--out`, or a persona scenario with neither its model key nor `--operator-answers`; nothing is run or written | 64 |
 
 An `invalid` run records `failure` in `verdict.json`, with two separate facts: where it failed, and whether a retry can help.
 

@@ -267,6 +267,20 @@ def test_cli_run_artifacts_are_private(tmp_path):
     }
 
 
+def test_cli_run_without_an_operator_key_is_a_usage_error_and_creates_nothing(
+    tmp_path, monkeypatch
+):
+    from pathlib import Path
+
+    from overnight.cli import USAGE_EXIT_CODE, main
+
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    scenario = Path(__file__).resolve().parents[1] / "examples" / "shared-world-chaos.json"
+    output = tmp_path / "run"
+    assert main(["run", str(scenario), "--out", str(output)]) == USAGE_EXIT_CODE
+    assert not output.exists()
+
+
 def test_denied_approval_is_terminal_and_invocation_id_cannot_rebind():
     policy = ExecutionPolicy(
         {
