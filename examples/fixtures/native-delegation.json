@@ -1,0 +1,114 @@
+{
+  "id": "native-background-delegation",
+  "seed": 47,
+  "start_time": 0,
+  "horizon": 30,
+  "max_steps": 40,
+  "actors": [
+    {
+      "id": "operator",
+      "role": "operator"
+    },
+    {
+      "id": "agent",
+      "role": "agent",
+      "read_services": [
+        "mail",
+        "records"
+      ],
+      "operations": {
+        "mail": [
+          "send_message"
+        ],
+        "records": [
+          "add_record"
+        ]
+      }
+    },
+    {
+      "id": "colleague",
+      "role": "person",
+      "operations": {
+        "mail": [
+          "send_message"
+        ]
+      }
+    }
+  ],
+  "services": [
+    {
+      "id": "mail",
+      "kind": "mail",
+      "state": {
+        "messages": []
+      }
+    },
+    {
+      "id": "records",
+      "kind": "records",
+      "state": {
+        "collections": {
+          "audit": {
+            "records": [],
+            "add": {
+              "required": [
+                "status"
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
+  "agent": {
+    "kind": "scripted",
+    "actions": []
+  },
+  "operator": {
+    "policy": {
+      "default": "allow",
+      "rules": []
+    },
+    "steps": [
+      {
+        "kind": "message",
+        "at": 0,
+        "message": "Use your actual native subagent/delegation tool to start one child. The complete child brief is: Use the connected world MCP tool records.add_record (records__add_record if exposed with that name) to add exactly one record in collection audit with data {\"status\":\"CHILD_DONE\"}. Do not send mail. Then return exactly child-finished-83. Do NOT call records yourself. Start the child and finish your first response immediately without inline wait_agent or polling. Once the harness delivers the completed child report, use world mail.send_message to send one message to colleague, subject ChildReceipt, body exactly child-finished-83. Do not send mail until the real child completed its operation. Use a work-mode child if your harness requires a mode; inherit the current Luna model."
+      }
+    ]
+  },
+  "checks": {
+    "outcomes": [
+      {
+        "source": "state",
+        "op": "eq",
+        "path": [
+          "services",
+          "records",
+          "state",
+          "collections",
+          "audit",
+          "records",
+          0,
+          "status"
+        ],
+        "value": "CHILD_DONE"
+      },
+      {
+        "source": "state",
+        "op": "eq",
+        "path": [
+          "services",
+          "mail",
+          "state",
+          "messages",
+          0,
+          "body"
+        ],
+        "value": "child-finished-83"
+      }
+    ],
+    "collateral": [],
+    "forbidden": []
+  }
+}

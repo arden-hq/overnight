@@ -1,0 +1,1788 @@
+{
+  "$defs": {
+    "ApiError": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "details": {
+          "$ref": "#/$defs/JsonValue",
+          "default": null
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "ApiError",
+      "type": "object"
+    },
+    "CheckView": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence_lines": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Evidence Lines",
+          "type": "array"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Label"
+        },
+        "layer": {
+          "$ref": "#/$defs/Layer"
+        },
+        "passed": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Passed"
+        },
+        "predicate": {
+          "title": "Predicate",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "layer",
+        "index",
+        "label",
+        "text",
+        "predicate",
+        "source",
+        "passed",
+        "evidence_lines"
+      ],
+      "title": "CheckView",
+      "type": "object"
+    },
+    "ComparedCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "a": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "A"
+        },
+        "b": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "B"
+        },
+        "definition_changed": {
+          "title": "Definition Changed",
+          "type": "boolean"
+        },
+        "differs": {
+          "title": "Differs",
+          "type": "boolean"
+        },
+        "in_a": {
+          "title": "In A",
+          "type": "boolean"
+        },
+        "in_b": {
+          "title": "In B",
+          "type": "boolean"
+        },
+        "index": {
+          "title": "Index",
+          "type": "integer"
+        },
+        "layer": {
+          "$ref": "#/$defs/Layer"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Task Id"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "layer",
+        "index",
+        "task_id",
+        "text",
+        "in_a",
+        "in_b",
+        "a",
+        "b",
+        "differs",
+        "definition_changed"
+      ],
+      "title": "ComparedCheck",
+      "type": "object"
+    },
+    "Divergence": {
+      "additionalProperties": false,
+      "description": "The first position where the two runs' non-view trace entries differ.",
+      "properties": {
+        "a": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceStep"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "b": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceStep"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fields": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "position": {
+          "title": "Position",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "position",
+        "fields",
+        "a",
+        "b"
+      ],
+      "title": "Divergence",
+      "type": "object"
+    },
+    "FrozenJson": {
+      "$ref": "#/$defs/JsonValue"
+    },
+    "JsonObject": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "type": "object"
+    },
+    "JsonValue": {},
+    "Lane": {
+      "enum": [
+        "operator",
+        "agent",
+        "tools",
+        "people",
+        "services",
+        "views",
+        "system"
+      ],
+      "type": "string"
+    },
+    "Layer": {
+      "enum": [
+        "outcome",
+        "collateral",
+        "claims",
+        "forbidden"
+      ],
+      "type": "string"
+    },
+    "OperationState": {
+      "enum": [
+        "running",
+        "finished",
+        "failed",
+        "stopped"
+      ],
+      "type": "string"
+    },
+    "OperationView": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "read_only": {
+          "title": "Read Only",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "read_only",
+        "input_schema"
+      ],
+      "title": "OperationView",
+      "type": "object"
+    },
+    "Pending": {
+      "additionalProperties": false,
+      "properties": {
+        "approvals": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "events": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "operator_steps": {
+          "$ref": "#/$defs/JsonValue"
+        }
+      },
+      "required": [
+        "events",
+        "operator_steps",
+        "approvals"
+      ],
+      "title": "Pending",
+      "type": "object"
+    },
+    "ProvenanceSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "adapter_identity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Adapter Identity"
+        },
+        "adapter_kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Adapter Kind"
+        },
+        "backend_commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Backend Commit"
+        },
+        "connector": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "connector_status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Connector Status"
+        },
+        "model": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "scenario_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Scenario Sha256"
+        },
+        "seed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Seed"
+        }
+      },
+      "required": [
+        "model",
+        "connector",
+        "connector_status",
+        "adapter_kind",
+        "adapter_identity",
+        "backend_commit",
+        "scenario_sha256",
+        "seed"
+      ],
+      "title": "ProvenanceSummary",
+      "type": "object"
+    },
+    "RunComparison": {
+      "additionalProperties": false,
+      "properties": {
+        "a": {
+          "title": "A",
+          "type": "string"
+        },
+        "b": {
+          "title": "B",
+          "type": "string"
+        },
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/ComparedCheck"
+          },
+          "title": "Checks",
+          "type": "array"
+        },
+        "compared_entries": {
+          "title": "Compared Entries",
+          "type": "integer"
+        },
+        "divergence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Divergence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scenario_a": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Scenario A"
+        },
+        "scenario_b": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Scenario B"
+        }
+      },
+      "required": [
+        "a",
+        "b",
+        "scenario_a",
+        "scenario_b",
+        "checks",
+        "compared_entries",
+        "divergence"
+      ],
+      "title": "RunComparison",
+      "type": "object"
+    },
+    "RunDetail": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Agent Kind"
+        },
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/CheckView"
+          },
+          "title": "Checks",
+          "type": "array"
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunFailure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "final_state": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "issues": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Issues",
+          "type": "array"
+        },
+        "kinds": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Kinds",
+          "type": "object"
+        },
+        "pending": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Pending"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provenance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProvenanceSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rejected_actions": {
+          "title": "Rejected Actions",
+          "type": "integer"
+        },
+        "run_status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Run Status"
+        },
+        "scenario": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "scenario_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Scenario Id"
+        },
+        "schema_current": {
+          "title": "Schema Current",
+          "type": "boolean"
+        },
+        "schema_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Schema Error"
+        },
+        "tasks": {
+          "items": {
+            "$ref": "#/$defs/TaskView"
+          },
+          "title": "Tasks",
+          "type": "array"
+        },
+        "timeline": {
+          "items": {
+            "$ref": "#/$defs/TimelineItem"
+          },
+          "title": "Timeline",
+          "type": "array"
+        },
+        "trace_entries": {
+          "title": "Trace Entries",
+          "type": "integer"
+        },
+        "variation": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "verdict": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Verdict"
+        }
+      },
+      "required": [
+        "id",
+        "scenario_id",
+        "schema_current",
+        "schema_error",
+        "verdict",
+        "run_status",
+        "failure",
+        "rejected_actions",
+        "agent_kind",
+        "checks",
+        "tasks",
+        "pending",
+        "provenance",
+        "variation",
+        "scenario",
+        "final_state",
+        "trace_entries",
+        "kinds",
+        "timeline",
+        "issues"
+      ],
+      "title": "RunDetail",
+      "type": "object"
+    },
+    "RunFailure": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Kind"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Message"
+        },
+        "retryable": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Retryable"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Type"
+        }
+      },
+      "required": [
+        "kind",
+        "retryable",
+        "type",
+        "message"
+      ],
+      "title": "RunFailure",
+      "type": "object"
+    },
+    "RunList": {
+      "additionalProperties": false,
+      "properties": {
+        "runs": {
+          "items": {
+            "$ref": "#/$defs/RunSummary"
+          },
+          "title": "Runs",
+          "type": "array"
+        },
+        "scanned_seconds": {
+          "title": "Scanned Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "runs",
+        "scanned_seconds"
+      ],
+      "title": "RunList",
+      "type": "object"
+    },
+    "RunOperation": {
+      "additionalProperties": false,
+      "description": "One `overnight run` process. ``finished`` means the run wrote a verdict, whatever it says.",
+      "properties": {
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Command",
+          "type": "array"
+        },
+        "ended": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ended"
+        },
+        "exit_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Exit Code"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "out": {
+          "title": "Out",
+          "type": "string"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Run Id"
+        },
+        "scenario": {
+          "title": "Scenario",
+          "type": "string"
+        },
+        "scenario_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Scenario Id"
+        },
+        "started": {
+          "title": "Started",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/OperationState"
+        },
+        "stderr_tail": {
+          "title": "Stderr Tail",
+          "type": "string"
+        },
+        "stdout_tail": {
+          "title": "Stdout Tail",
+          "type": "string"
+        },
+        "stop_requested": {
+          "title": "Stop Requested",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "scenario",
+        "scenario_id",
+        "run_id",
+        "out",
+        "command",
+        "state",
+        "stop_requested",
+        "exit_code",
+        "started",
+        "ended",
+        "stdout_tail",
+        "stderr_tail"
+      ],
+      "title": "RunOperation",
+      "type": "object"
+    },
+    "RunRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "modified": {
+          "title": "Modified",
+          "type": "string"
+        },
+        "verdict": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Verdict"
+        }
+      },
+      "required": [
+        "id",
+        "verdict",
+        "modified"
+      ],
+      "title": "RunRef",
+      "type": "object"
+    },
+    "RunSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "adapter_kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Adapter Kind"
+        },
+        "agent_kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Agent Kind"
+        },
+        "claims_passed": {
+          "title": "Claims Passed",
+          "type": "integer"
+        },
+        "claims_total": {
+          "title": "Claims Total",
+          "type": "integer"
+        },
+        "collateral_passed": {
+          "title": "Collateral Passed",
+          "type": "integer"
+        },
+        "collateral_total": {
+          "title": "Collateral Total",
+          "type": "integer"
+        },
+        "complete": {
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "connector_status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Connector Status"
+        },
+        "forbidden_hits": {
+          "title": "Forbidden Hits",
+          "type": "integer"
+        },
+        "has_overrides": {
+          "title": "Has Overrides",
+          "type": "boolean"
+        },
+        "has_tasks": {
+          "title": "Has Tasks",
+          "type": "boolean"
+        },
+        "has_variation": {
+          "title": "Has Variation",
+          "type": "boolean"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "model": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "modified": {
+          "title": "Modified",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "outcomes_passed": {
+          "title": "Outcomes Passed",
+          "type": "integer"
+        },
+        "outcomes_total": {
+          "title": "Outcomes Total",
+          "type": "integer"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "root": {
+          "title": "Root",
+          "type": "integer"
+        },
+        "run_status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Run Status"
+        },
+        "scenario_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Scenario Id"
+        },
+        "verdict": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Verdict"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "path",
+        "root",
+        "modified",
+        "scenario_id",
+        "agent_kind",
+        "verdict",
+        "run_status",
+        "outcomes_passed",
+        "outcomes_total",
+        "collateral_passed",
+        "collateral_total",
+        "claims_passed",
+        "claims_total",
+        "forbidden_hits",
+        "model",
+        "adapter_kind",
+        "connector_status",
+        "has_tasks",
+        "has_variation",
+        "has_overrides",
+        "complete"
+      ],
+      "title": "RunSummary",
+      "type": "object"
+    },
+    "ScenarioCheckSet": {
+      "additionalProperties": false,
+      "properties": {
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/CheckView"
+          },
+          "title": "Checks",
+          "type": "array"
+        },
+        "tasks": {
+          "additionalProperties": {
+            "items": {
+              "$ref": "#/$defs/CheckView"
+            },
+            "type": "array"
+          },
+          "title": "Tasks",
+          "type": "object"
+        }
+      },
+      "required": [
+        "checks",
+        "tasks"
+      ],
+      "title": "ScenarioCheckSet",
+      "type": "object"
+    },
+    "ScenarioDetail": {
+      "additionalProperties": false,
+      "properties": {
+        "checks": {
+          "$ref": "#/$defs/ScenarioCheckSet"
+        },
+        "scenario": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "services": {
+          "items": {
+            "$ref": "#/$defs/ServiceView"
+          },
+          "title": "Services",
+          "type": "array"
+        },
+        "summary": {
+          "$ref": "#/$defs/ScenarioSummary"
+        }
+      },
+      "required": [
+        "summary",
+        "scenario",
+        "services",
+        "checks"
+      ],
+      "title": "ScenarioDetail",
+      "type": "object"
+    },
+    "ScenarioList": {
+      "additionalProperties": false,
+      "properties": {
+        "scenarios": {
+          "items": {
+            "$ref": "#/$defs/ScenarioSummary"
+          },
+          "title": "Scenarios",
+          "type": "array"
+        }
+      },
+      "required": [
+        "scenarios"
+      ],
+      "title": "ScenarioList",
+      "type": "object"
+    },
+    "ScenarioSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Agent Kind"
+        },
+        "check_counts": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Check Counts",
+          "type": "object"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Error"
+        },
+        "etag": {
+          "title": "Etag",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "last_run": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "people": {
+          "title": "People",
+          "type": "integer"
+        },
+        "scenario_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Scenario Id"
+        },
+        "service_kinds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Service Kinds",
+          "type": "array"
+        },
+        "task_count": {
+          "title": "Task Count",
+          "type": "integer"
+        },
+        "valid": {
+          "title": "Valid",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "scenario_id",
+        "path",
+        "valid",
+        "error",
+        "agent_kind",
+        "task_count",
+        "service_kinds",
+        "people",
+        "check_counts",
+        "etag",
+        "last_run"
+      ],
+      "title": "ScenarioSummary",
+      "type": "object"
+    },
+    "ScenarioValidation": {
+      "additionalProperties": false,
+      "properties": {
+        "scenario_id": {
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "seed": {
+          "title": "Seed",
+          "type": "integer"
+        },
+        "valid": {
+          "title": "Valid",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "valid",
+        "scenario_id",
+        "seed"
+      ],
+      "title": "ScenarioValidation",
+      "type": "object"
+    },
+    "ServiceView": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "operations": {
+          "items": {
+            "$ref": "#/$defs/OperationView"
+          },
+          "title": "Operations",
+          "type": "array"
+        },
+        "state": {
+          "$ref": "#/$defs/JsonValue"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "operations",
+        "state"
+      ],
+      "title": "ServiceView",
+      "type": "object"
+    },
+    "StatusResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_live": {
+          "title": "Allow Live",
+          "type": "boolean"
+        },
+        "operation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunOperation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "runs_roots": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Runs Roots",
+          "type": "array"
+        },
+        "scenarios_roots": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Scenarios Roots",
+          "type": "array"
+        },
+        "service": {
+          "title": "Service",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "service",
+        "version",
+        "runs_roots",
+        "scenarios_roots",
+        "allow_live",
+        "operation"
+      ],
+      "title": "StatusResponse",
+      "type": "object"
+    },
+    "TaskView": {
+      "additionalProperties": false,
+      "properties": {
+        "chat_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Chat Id"
+        },
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/CheckView"
+          },
+          "title": "Checks",
+          "type": "array"
+        },
+        "completed_at": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Completed At"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Message"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Status"
+        },
+        "steps": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Steps"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "verdict": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Verdict"
+        }
+      },
+      "required": [
+        "task_id",
+        "chat_id",
+        "message",
+        "status",
+        "verdict",
+        "completed_at",
+        "steps",
+        "checks"
+      ],
+      "title": "TaskView",
+      "type": "object"
+    },
+    "TimelineItem": {
+      "additionalProperties": false,
+      "properties": {
+        "actor_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Actor Id"
+        },
+        "chat_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Chat Id"
+        },
+        "event_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Event Id"
+        },
+        "invocation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Invocation Id"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "lane": {
+          "$ref": "#/$defs/Lane"
+        },
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        },
+        "row": {
+          "title": "Row",
+          "type": "string"
+        },
+        "sequence": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Sequence"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Status"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Task Id"
+        },
+        "time": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Time"
+        },
+        "view": {
+          "title": "View",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "line",
+        "sequence",
+        "time",
+        "lane",
+        "row",
+        "kind",
+        "label",
+        "actor_id",
+        "invocation_id",
+        "event_id",
+        "task_id",
+        "chat_id",
+        "status",
+        "view"
+      ],
+      "title": "TimelineItem",
+      "type": "object"
+    },
+    "TraceEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "actor_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actor Id"
+        },
+        "cause_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cause Id"
+        },
+        "chat_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chat Id"
+        },
+        "event_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Event Id"
+        },
+        "invocation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Invocation Id"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/FrozenJson"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "time": {
+          "title": "Time",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sequence",
+        "time",
+        "kind",
+        "payload"
+      ],
+      "title": "TraceEntry",
+      "type": "object"
+    },
+    "TraceLine": {
+      "additionalProperties": false,
+      "properties": {
+        "entry": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "line",
+        "entry"
+      ],
+      "title": "TraceLine",
+      "type": "object"
+    },
+    "TraceQueryResult": {
+      "additionalProperties": false,
+      "properties": {
+        "matched": {
+          "title": "Matched",
+          "type": "integer"
+        },
+        "records": {
+          "items": {
+            "$ref": "#/$defs/TraceRecord"
+          },
+          "title": "Records",
+          "type": "array"
+        },
+        "returned": {
+          "title": "Returned",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "matched",
+        "returned",
+        "records"
+      ],
+      "title": "TraceQueryResult",
+      "type": "object"
+    },
+    "TraceRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "entry": {
+          "$ref": "#/$defs/TraceEntry"
+        },
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "line",
+        "entry"
+      ],
+      "title": "TraceRecord",
+      "type": "object"
+    },
+    "TraceStep": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        },
+        "sequence": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Sequence"
+        },
+        "time": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Time"
+        }
+      },
+      "required": [
+        "line",
+        "sequence",
+        "time",
+        "kind",
+        "label"
+      ],
+      "title": "TraceStep",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "ApiError": {
+      "$ref": "#/$defs/ApiError"
+    },
+    "RunComparison": {
+      "$ref": "#/$defs/RunComparison"
+    },
+    "RunDetail": {
+      "$ref": "#/$defs/RunDetail"
+    },
+    "RunList": {
+      "$ref": "#/$defs/RunList"
+    },
+    "RunOperation": {
+      "$ref": "#/$defs/RunOperation"
+    },
+    "RunSummary": {
+      "$ref": "#/$defs/RunSummary"
+    },
+    "ScenarioDetail": {
+      "$ref": "#/$defs/ScenarioDetail"
+    },
+    "ScenarioList": {
+      "$ref": "#/$defs/ScenarioList"
+    },
+    "ScenarioValidation": {
+      "$ref": "#/$defs/ScenarioValidation"
+    },
+    "StatusResponse": {
+      "$ref": "#/$defs/StatusResponse"
+    },
+    "TraceLine": {
+      "$ref": "#/$defs/TraceLine"
+    },
+    "TraceQueryResult": {
+      "$ref": "#/$defs/TraceQueryResult"
+    }
+  },
+  "title": "OvernightWorkbenchApi",
+  "type": "object"
+}

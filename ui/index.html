@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Overnight</title>
+    <script>
+      // Set the theme before the first paint so colors never transition on load.
+      (function () {
+        var t = new URLSearchParams(location.search).get("theme");
+        try {
+          t = t || localStorage.getItem("overnight-theme");
+        } catch (e) {}
+        t = t || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+        document.documentElement.dataset.theme = t;
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,366 @@
+diff --git a/packages/cli/src/acp/agent.ts b/packages/cli/src/acp/agent.ts
+index bb2f7c8..a3ed2a4 100644
+--- a/packages/cli/src/acp/agent.ts
++++ b/packages/cli/src/acp/agent.ts
+@@ -22,6 +22,28 @@ import { ACPTurn } from "./turn"
+ 
+ type HandlerContext<Params> = AgentHandlerContext<Params> & { readonly requestId?: JsonRpcId }
+ 
++type SteeringRequest = {
++  readonly sessionId: string
++  readonly messageId: string
++  readonly message: string
++}
++
++const parseSteeringRequest = (params: unknown): SteeringRequest => {
++  if (
++    typeof params !== "object" ||
++    params === null ||
++    !("sessionId" in params) ||
++    typeof params.sessionId !== "string" ||
++    !("messageId" in params) ||
++    typeof params.messageId !== "string" ||
++    !("message" in params) ||
++    typeof params.message !== "string"
++  ) {
++    throw RequestError.invalidParams()
++  }
++  return params as SteeringRequest
++}
++
+ // Untraced so request spans parent to the caller's span instead of a setup span that has already ended.
+ export const connect = Effect.fnUntraced(function* (client: OpenCodeClient, stream: Stream) {
+   const run = Effect.runPromiseWith(yield* Effect.context<Scope.Scope>())
+@@ -117,6 +139,13 @@ export const connect = Effect.fnUntraced(function* (client: OpenCodeClient, stre
+     "session/cancel",
+     handle((service, ctx) => service.cancel(ctx.params)),
+   )
++  app.onRequest(
++    "_session/steering",
++    parseSteeringRequest,
++    handle((service, ctx: AgentHandlerContext<SteeringRequest>) => service.steer(ctx.params))(
++      "cli.acp.session.steering",
++    ),
++  )
+   const acp = ACPConnection.make(app, stream)
+   const connection = acp.connection
+   const sessions = yield* ACPSessions.make({ client, connection, catalog })
+diff --git a/packages/cli/src/acp/service.ts b/packages/cli/src/acp/service.ts
+index bdcca82..78c511b 100644
+--- a/packages/cli/src/acp/service.ts
++++ b/packages/cli/src/acp/service.ts
+@@ -63,6 +63,7 @@ export interface Interface {
+   readonly setSessionMode: (input: SetSessionModeRequest) => Effect.Effect<SetSessionModeResponse, ACPError.Failure>
+   readonly prompt: (input: PromptRequest, signal: AbortSignal) => Effect.Effect<PromptResponse, ACPError.Failure>
+   readonly cancel: (input: CancelNotification) => Effect.Effect<void>
++  readonly steer: (input: { readonly sessionId: string; readonly messageId: string; readonly message: string }) => Effect.Effect<{ readonly outcome: "injected" }, ACPError.Failure>
+ }
+ 
+ export function make(input: {
+@@ -127,6 +128,7 @@ export function make(input: {
+         },
+         authMethods: [authMethod],
+         agentInfo: { name: "OpenCode", version: OPENCODE_VERSION },
++        _meta: { steering: { supported: true } },
+       }
+     }),
+     authenticate: Effect.fnUntraced(function* (params) {
+@@ -236,6 +238,7 @@ export function make(input: {
+       return {}
+     }),
+     prompt: input.turn.prompt,
++    steer: input.turn.steer,
+     cancel: input.turn.cancel,
+   }
+ }
+diff --git a/packages/cli/src/acp/turn.ts b/packages/cli/src/acp/turn.ts
+index c02aeac..e101494 100644
+--- a/packages/cli/src/acp/turn.ts
++++ b/packages/cli/src/acp/turn.ts
+@@ -32,6 +32,7 @@ import { ACPTranslate } from "./translate"
+ export interface Interface {
+   readonly prompt: (input: PromptRequest, signal: AbortSignal) => Effect.Effect<PromptResponse, ACPError.Failure>
+   readonly cancel: (input: CancelNotification) => Effect.Effect<void>
++  readonly steer: (input: { readonly sessionId: string; readonly messageId: string; readonly message: string }) => Effect.Effect<{ readonly outcome: "injected" }, ACPError.Failure>
+   /** Unlike `cancel`, interrupts an idle session too, since server work can outlive its turn. */
+   readonly close: (sessionID: string) => Effect.Effect<void, ACPError.Error | RequestError>
+ }
+@@ -372,6 +373,12 @@ export const make = Effect.fnUntraced(function* (input: {
+   })
+ 
+   return {
++    steer: Effect.fn("cli.acp.turn.steer")(function* (params) {
++      if (!FiberMap.hasUnsafe(turns, params.sessionId)) return yield* new ACPError.InvalidRequestError({ message: "Session has no active ACP prompt", field: "sessionId" })
++      const attached = yield* input.sessions.require(params.sessionId)
++      yield* input.client.session.prompt({ sessionID: attached.id, text: params.message, delivery: "steer", requireActive: true, metadata: { overnightSteeringMessageId: params.messageId } }).pipe(Effect.catch(ACPClient.classify))
++      return { outcome: "injected" as const }
++    }),
+     prompt: Effect.fnUntraced(function* (params, signal) {
+       // Synchronous and before setup, so concurrent prompts cannot both register and an early cancel still applies.
+       const turn = yield* Effect.withFiber((fiber) => {
+diff --git a/packages/client/src/effect/api/api.ts b/packages/client/src/effect/api/api.ts
+index fc779f1..c5db415 100644
+--- a/packages/client/src/effect/api/api.ts
++++ b/packages/client/src/effect/api/api.ts
+@@ -281,6 +281,7 @@ export type SessionPromptInput = {
+   readonly metadata?: { readonly [x: string]: unknown } | undefined
+   readonly delivery?: SessionInbox.Delivery | undefined
+   readonly resume?: boolean | undefined
++  readonly requireActive?: boolean | undefined
+ }
+ export type SessionPromptOutput = SessionInbox.User
+ export type SessionPromptOperation<E = never> = (input: SessionPromptInput) => Effect.Effect<SessionPromptOutput, E>
+diff --git a/packages/client/src/effect/generated/client.ts b/packages/client/src/effect/generated/client.ts
+index 1df8ff7..846989f 100644
+--- a/packages/client/src/effect/generated/client.ts
++++ b/packages/client/src/effect/generated/client.ts
+@@ -529,6 +529,7 @@ const EndpointSessionPrompt = (raw: RawClient["server.session"]) => (input: Sess
+         metadata: input["metadata"],
+         delivery: input["delivery"],
+         resume: input["resume"],
++        requireActive: input["requireActive"],
+       },
+     }).pipe(
+       Effect.mapError(mapClientError),
+diff --git a/packages/core/src/session/execution.ts b/packages/core/src/session/execution.ts
+index fb7a9d3..7933820 100644
+--- a/packages/core/src/session/execution.ts
++++ b/packages/core/src/session/execution.ts
+@@ -1,6 +1,6 @@
+ export * as SessionExecution from "./execution.js"
+ 
+-import { Cause, Context, Effect, Exit, Layer } from "effect"
++import { Cause, Context, Effect, Exit, Layer, Option } from "effect"
+ import { Bus } from "../bus.js"
+ import { Database } from "../database/database.js"
+ import { Job } from "../job.js"
+@@ -19,6 +19,7 @@ export interface Interface {
+   readonly active: Effect.Effect<ReadonlySet<SessionSchema.ID>>
+   /** Checks process-local ownership, including interruption cleanup and terminal settlement. */
+   readonly isActive: (sessionID: SessionSchema.ID) => Effect.Effect<boolean>
++  readonly whileActive: <A, E, R>(sessionID: SessionSchema.ID, effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | ActiveExecutionRequired, R>
+   /** Starts execution while idle or joins the active execution. */
+   readonly resume: (sessionID: SessionSchema.ID) => Effect.Effect<void, SessionRunner.RunError>
+   /** Registers newly recorded work. Repeated wakeups may coalesce. */
+@@ -41,6 +42,7 @@ export interface Interface {
+ 
+ /** Routes execution from a Session ID to its selected instance's runner. */
+ export class Service extends Context.Service<Service, Interface>()("@opencode/SessionExecution") {}
++export class ActiveExecutionRequired extends Error { readonly _tag = "SessionExecution.ActiveExecutionRequired" }
+ 
+ type InterruptReason = "user" | "shutdown"
+ 
+@@ -147,6 +149,7 @@ export const layer = Layer.effect(
+     return Service.of({
+       active: coordinator.active,
+       isActive: coordinator.isActive,
++      whileActive: (sessionID, effect) => coordinator.whileActive(sessionID, effect).pipe(Effect.flatMap(Option.match({ onNone: () => Effect.fail(new ActiveExecutionRequired()), onSome: Effect.succeed }))),
+       interrupt: (sessionID, options) =>
+         Effect.gen(function* () {
+           const interrupted = yield* coordinator.interrupt(sessionID, "user")
+@@ -184,6 +187,7 @@ export const noopLayer = Layer.succeed(
+   Service.of({
+     active: Effect.succeed(new Set()),
+     isActive: () => Effect.succeed(false),
++    whileActive: () => Effect.fail(new ActiveExecutionRequired()),
+     resume: () => Effect.void,
+     wake: () => Effect.void,
+     interrupt: () => Effect.succeed(false),
+diff --git a/packages/core/src/session/run-coordinator.ts b/packages/core/src/session/run-coordinator.ts
+index a8e7531..b310f02 100644
+--- a/packages/core/src/session/run-coordinator.ts
++++ b/packages/core/src/session/run-coordinator.ts
+@@ -1,6 +1,6 @@
+ export * as SessionRunCoordinator from "./run-coordinator.js"
+ 
+-import { Deferred, Effect, Exit, Fiber, FiberSet, Scope } from "effect"
++import { Deferred, Effect, Exit, Fiber, FiberSet, Option, Scope } from "effect"
+ import type { Promotable } from "./inbox.js"
+ 
+ /** Serializes execution for each key while allowing different keys to run concurrently. */
+@@ -9,6 +9,8 @@ export interface Coordinator<Key, E, Reason = never> {
+   readonly active: Effect.Effect<ReadonlySet<Key>>
+   /** Checks ownership for one key, including cleanup and terminal settlement. */
+   readonly isActive: (key: Key) => Effect.Effect<boolean>
++  /** Runs an admission while the current execution remains owned; idle or stopping keys are rejected. */
++  readonly whileActive: <A, E2, R>(key: Key, effect: Effect.Effect<A, E2, R>) => Effect.Effect<Option.Option<A>, E2, R>
+   /** Starts an execution while idle, or joins the active execution and returns its exit. */
+   readonly run: (key: Key) => Effect.Effect<void, E>
+   /** Rings the doorbell: an idle key starts an execution; an active one drains again before settling. */
+@@ -39,6 +41,8 @@ type Execution<E, Reason> = {
+   pendingWake?: Promotable
+   stopping: boolean
+   interruptionReason?: Reason
++  admissions: number
++  admissionsDone?: Deferred.Deferred<void>
+ }
+ 
+ /**
+@@ -84,6 +88,7 @@ export const make = <Key, E, Reason = never>(options: {
+         done: Deferred.makeUnsafe<void, E>(),
+         scope,
+         stopping: false,
++        admissions: 0,
+       }
+       executions.set(key, execution)
+       // The leading yield lets `owner` be assigned before the drain can settle, and keeps
+@@ -93,6 +98,7 @@ export const make = <Key, E, Reason = never>(options: {
+         Effect.yieldNow.pipe(
+           Effect.andThen(Effect.uninterruptible(options.started?.(key) ?? Effect.void)),
+           Effect.andThen(loop(key, execution, force)),
++          Effect.andThen(Effect.suspend(() => execution.admissionsDone ? Deferred.await(execution.admissionsDone) : Effect.void)),
+           Effect.onExit((exit) =>
+             Effect.sync(() => {
+               execution.owner = undefined
+@@ -116,6 +122,21 @@ export const make = <Key, E, Reason = never>(options: {
+ 
+     const isActive = (key: Key) => Effect.sync(() => executions.has(key))
+ 
++    const whileActive = <A, E2, R>(key: Key, effect: Effect.Effect<A, E2, R>): Effect.Effect<Option.Option<A>, E2, R> =>
++      Effect.suspend(() => {
++        const execution = executions.get(key)
++        if (execution === undefined || execution.stopping || execution.owner === undefined) return Effect.succeed(Option.none())
++        if (execution.admissions === 0) execution.admissionsDone = Deferred.makeUnsafe<void>()
++        execution.admissions++
++        return effect.pipe(Effect.map(Option.some), Effect.ensuring(Effect.sync(() => {
++          execution.admissions--
++          if (execution.admissions === 0 && execution.admissionsDone) {
++            Deferred.doneUnsafe(execution.admissionsDone, Effect.void)
++            execution.admissionsDone = undefined
++          }
++        })))
++      })
++
+     const run = (key: Key): Effect.Effect<void, E> =>
+       Effect.suspend(() => {
+         const execution = executions.get(key)
+@@ -170,5 +191,5 @@ export const make = <Key, E, Reason = never>(options: {
+         return Deferred.await(execution.done).pipe(Effect.ignoreCause, Effect.andThen(awaitIdle(key)))
+       })
+ 
+-    return { active: Effect.sync(() => new Set(executions.keys())), isActive, run, wake, interrupt, awaitIdle }
++    return { active: Effect.sync(() => new Set(executions.keys())), isActive, whileActive, run, wake, interrupt, awaitIdle }
+   })
+diff --git a/packages/core/src/session/session.ts b/packages/core/src/session/session.ts
+index 06c2b24..2cbb485 100644
+--- a/packages/core/src/session/session.ts
++++ b/packages/core/src/session/session.ts
+@@ -33,6 +33,7 @@ import { SessionStore } from "./store.js"
+ type PromptRequest = SessionPrompt.Input & {
+   id?: SessionMessage.ID
+   resume?: boolean
++  requireActive?: boolean
+ }
+ 
+ /**
+@@ -157,7 +158,7 @@ export const make = Effect.fn("Session.make")(function* () {
+       Effect.gen(function* () {
+         const session = yield* get(sessionID)
+         const messageID = input.id ?? SessionMessage.ID.create()
+-        const admitted = yield* Effect.gen(function* () {
++        const admit = Effect.gen(function* () {
+           const existing = yield* admission.reconcile({
+             id: messageID,
+             sessionID: session.id,
+@@ -181,6 +182,7 @@ export const make = Effect.fn("Session.make")(function* () {
+         }).pipe(
+           Effect.catchTag("SessionInbox.LifecycleConflict", () => new PromptConflictError({ sessionID, messageID })),
+         )
++        const admitted = input.requireActive ? yield* execution.whileActive(sessionID, admit) : yield* admit
+         if (input.resume !== false) yield* execution.wake(sessionID)
+         return admitted
+       }),
+diff --git a/packages/core/test/session-run-coordinator.test.ts b/packages/core/test/session-run-coordinator.test.ts
+index e02a845..b92056a 100644
+--- a/packages/core/test/session-run-coordinator.test.ts
++++ b/packages/core/test/session-run-coordinator.test.ts
+@@ -684,3 +684,44 @@ describe("SessionRunCoordinator", () => {
+     }),
+   )
+ })
++
++it.effect("rejects inactive admission without running its effect", () =>
++  Effect.gen(function* () {
++    let admitted = 0
++    const coordinator = yield* SessionRunCoordinator.make<string, never>({ drain: () => Effect.void })
++
++    const result = yield* coordinator.whileActive("session", Effect.sync(() => ++admitted))
++
++    expect(result._tag).toBe("None")
++    expect(admitted).toBe(0)
++    expect(yield* coordinator.isActive("session")).toBeFalse()
++  }),
++)
++
++it.effect("holds ownership until an active admission completes", () =>
++  Effect.gen(function* () {
++    const drainStarted = yield* Deferred.make<void>()
++    const drainGate = yield* Deferred.make<void>()
++    const admissionStarted = yield* Deferred.make<void>()
++    const admissionGate = yield* Deferred.make<void>()
++    const coordinator = yield* SessionRunCoordinator.make<string, never>({
++      drain: () => Deferred.succeed(drainStarted, undefined).pipe(Effect.andThen(Deferred.await(drainGate))),
++    })
++    const running = yield* coordinator.run("session").pipe(Effect.forkChild)
++    yield* Deferred.await(drainStarted)
++    const admission = yield* coordinator
++      .whileActive(
++        "session",
++        Deferred.succeed(admissionStarted, undefined).pipe(Effect.andThen(Deferred.await(admissionGate))),
++      )
++      .pipe(Effect.forkChild)
++    yield* Deferred.await(admissionStarted)
++    yield* Deferred.succeed(drainGate, undefined)
++    yield* Effect.yieldNow
++    expect(yield* coordinator.isActive("session")).toBeTrue()
++    yield* Deferred.succeed(admissionGate, undefined)
++    yield* Fiber.join(admission)
++    yield* Fiber.join(running)
++    expect(yield* coordinator.isActive("session")).toBeFalse()
++  }),
++)
+diff --git a/packages/protocol/src/groups/session.ts b/packages/protocol/src/groups/session.ts
+index 95683c8..12520cb 100644
+--- a/packages/protocol/src/groups/session.ts
++++ b/packages/protocol/src/groups/session.ts
+@@ -340,6 +340,7 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S, FormI ext
+           metadata: SessionInbox.UserPayload.fields.metadata,
+           delivery: SessionInbox.Delivery.pipe(Schema.optional),
+           resume: Schema.Boolean.pipe(Schema.optional),
++          requireActive: Schema.Boolean.pipe(Schema.optional),
+         }),
+         success: Schema.Struct({ data: SessionInbox.User }),
+         error: [ConflictError, InvalidRequestError, SessionNotFoundError],
+diff --git a/packages/server/src/handlers/session.ts b/packages/server/src/handlers/session.ts
+index 0386bd4..6ead33e 100644
+--- a/packages/server/src/handlers/session.ts
++++ b/packages/server/src/handlers/session.ts
+@@ -120,6 +120,9 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
+               })
+               .pipe(
+                 Effect.catchTag("Session.NotFoundError", missingSession),
++                Effect.catchTag("SessionExecution.ActiveExecutionRequired", () =>
++                  Effect.fail(new InvalidRequestError({ message: "Session has no active execution", field: "requireActive" })),
++                ),
+                 Effect.catchTag(
+                   "SessionTransfer.ImportConflictError",
+                   (error) =>
+@@ -290,6 +293,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
+                 metadata: ctx.payload.metadata,
+                 delivery: ctx.payload.delivery,
+                 resume: ctx.payload.resume,
++                requireActive: ctx.payload.requireActive,
+               })
+               .pipe(
+                 Effect.catchTag("Session.NotFoundError", missingSession),
+--- a/packages/cli/src/util/process.ts
++++ b/packages/cli/src/util/process.ts
+@@ -7,7 +7,7 @@ export function selfCommand() {
+   if (runtime !== "bun" && runtime !== "node" && runtime !== "nodejs") return [process.execPath]
+   if (!entrypoint) throw new Error("Failed to resolve CLI entrypoint")
+   if (runtime === "node" || runtime === "nodejs") return [process.execPath, ...nodeFlags(), entrypoint]
+-  return [process.execPath, entrypoint]
++  return [process.execPath, "--jsx-import-source", "@opentui/solid", entrypoint]
+ }
+ 
+ function nodeFlags() {

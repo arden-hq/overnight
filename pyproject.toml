@@ -1,0 +1,60 @@
+[project]
+name = "overnight"
+version = "0.1.0"
+description = "Scenario-driven agent evaluation worlds"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.14,<3.16"
+dependencies = [
+    "anyio>=4.11,<5",
+    "click>=8.3,<9",
+    "jsonschema>=4.25,<5",
+    "mcp>=1.26,<2",
+    "pydantic>=2.12,<3",
+    "regex>=2026.9.29",
+    "uvicorn>=0.35,<1",
+]
+
+[project.scripts]
+overnight = "overnight.cli:main"
+
+[project.optional-dependencies]
+feather = [
+    "feather-harness @ git+https://github.com/paper-instruments/feather-train.git@b7463092af862ebbdf4c5920c4bc9ab38ab17ad9#subdirectory=feather-harness",
+]
+acp = [
+    "agent-client-protocol>=0.12.1,<0.13",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.12",
+    "ty>=0.0.90",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--import-mode=importlib"]
+pythonpath = ["tests"]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+
+[tool.hatch.build.targets.sdist]
+include = ["/src/overnight", "/tests", "/examples", "/scripts", "/connectors", "/docs", "/README.md", "/LICENSE", "/AGENTS.md", "/pyproject.toml", "/uv.lock", "/.python-version"]
+exclude = ["/.local"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B", "C901"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 12

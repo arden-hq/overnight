@@ -1,0 +1,29 @@
+{
+  "people": {
+    "vendor": {
+      "availability": "reply after five seconds"
+    }
+  },
+  "data": {
+    "shop": {
+      "catalog": [
+        {
+          "id": "meal",
+          "title": "Conference meals",
+          "price_cents": 2500,
+          "available": 4
+        }
+      ]
+    }
+  },
+  "faults": [
+    {
+      "id": "cancel-outage",
+      "service_id": "shop",
+      "operation": "cancel_order",
+      "remaining": 1,
+      "probability": 0.5,
+      "error": "Temporary shop outage"
+    }
+  ]
+}

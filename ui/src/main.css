@@ -1,0 +1,59 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist-mono";
+/* Overnight's own components; in the components layer so Tailwind utilities can still override them. */
+@import "./index.css" layer(components);
+
+@custom-variant dark (&:is([data-theme="dark"] *));
+
+@theme inline {
+  --font-sans: var(--sans);
+  --font-mono: var(--mono);
+  --font-heading: var(--sans);
+  --color-background: var(--bg);
+  --color-foreground: var(--text);
+  --color-card: var(--panel);
+  --color-card-foreground: var(--text);
+  --color-popover: var(--panel);
+  --color-popover-foreground: var(--text);
+  --color-primary: var(--text);
+  --color-primary-foreground: var(--bg);
+  --color-secondary: var(--sunk);
+  --color-secondary-foreground: var(--text);
+  --color-muted: var(--sunk);
+  --color-muted-foreground: var(--muted);
+  --color-accent: var(--hover);
+  --color-accent-foreground: var(--text);
+  --color-destructive: var(--fail);
+  --color-border: var(--line);
+  --color-input: var(--line-strong);
+  --color-ring: var(--accent);
+  --color-user: var(--user);
+  --color-agent: var(--agent);
+  --color-world: var(--world);
+  --color-pass: var(--pass);
+  --color-fail: var(--fail);
+  --color-late: var(--late);
+  --radius-sm: var(--r-tag);
+  --radius-md: var(--r-house);
+  --radius-lg: var(--r-card);
+  --radius-xl: 14px;
+  --shadow-xs: var(--shadow-1);
+  --shadow-sm: var(--shadow-2);
+  --shadow-md: var(--shadow-3);
+  --shadow-lg: var(--shadow-5);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}

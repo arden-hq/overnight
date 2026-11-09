@@ -1,0 +1,181 @@
+{
+  "catering": [
+    {
+      "kind": "invoke",
+      "id": "ask-vendor",
+      "service_id": "chat",
+      "operation": "send_message",
+      "args": {
+        "conversation_id": "support",
+        "body": "Can we cancel with a full refund?"
+      },
+      "task_id": "catering",
+      "chat_id": "catering-chat"
+    },
+    {
+      "kind": "wait",
+      "until": 5
+    },
+    {
+      "kind": "invoke",
+      "id": "read-reply",
+      "service_id": "chat",
+      "operation": "read_messages",
+      "args": {
+        "conversation_id": "support"
+      },
+      "task_id": "catering",
+      "chat_id": "catering-chat"
+    },
+    {
+      "kind": "report",
+      "message": "The vendor confirmed order original can be cancelled for a full refund. May I cancel it?"
+    },
+    {
+      "kind": "wait",
+      "until": 6
+    },
+    {
+      "kind": "invoke",
+      "id": "cancel-first",
+      "service_id": "shop",
+      "operation": "cancel_order",
+      "args": {
+        "order_id": "original"
+      },
+      "task_id": "catering",
+      "chat_id": "catering-chat"
+    },
+    {
+      "kind": "invoke",
+      "id": "cancel-first",
+      "service_id": "shop",
+      "operation": "cancel_order",
+      "args": {
+        "order_id": "original"
+      },
+      "task_id": "catering",
+      "chat_id": "catering-chat"
+    },
+    {
+      "kind": "wait",
+      "until": 7
+    },
+    {
+      "kind": "invoke",
+      "id": "cancel-retry",
+      "service_id": "shop",
+      "operation": "cancel_order",
+      "args": {
+        "order_id": "original"
+      },
+      "task_id": "catering",
+      "chat_id": "catering-chat"
+    },
+    {
+      "kind": "invoke",
+      "id": "cancel-retry",
+      "service_id": "shop",
+      "operation": "cancel_order",
+      "args": {
+        "order_id": "original"
+      },
+      "task_id": "catering",
+      "chat_id": "catering-chat"
+    },
+    {
+      "kind": "wait",
+      "until": 10
+    },
+    {
+      "kind": "report",
+      "message": "Cancellation complete."
+    },
+    {
+      "kind": "done"
+    }
+  ],
+  "venue": [
+    {
+      "kind": "invoke",
+      "id": "move-event",
+      "service_id": "calendar",
+      "operation": "update_event",
+      "args": {
+        "id": "conference",
+        "start": "2026-10-22T11:00:00+04:00",
+        "end": "2026-10-22T12:00:00+04:00"
+      },
+      "task_id": "venue",
+      "chat_id": "venue-chat"
+    },
+    {
+      "kind": "done"
+    }
+  ],
+  "audit": [
+    {
+      "kind": "wait",
+      "until": 11
+    },
+    {
+      "kind": "invoke",
+      "id": "audit-add",
+      "service_id": "records",
+      "operation": "add_record",
+      "args": {
+        "collection": "audit",
+        "fields": {
+          "order_id": "original",
+          "status": "cancelled"
+        }
+      },
+      "task_id": "audit",
+      "chat_id": "audit-chat"
+    },
+    {
+      "kind": "invoke",
+      "id": "audit-final",
+      "service_id": "records",
+      "operation": "update_record",
+      "args": {
+        "collection": "audit",
+        "id": {
+          "$ref": {
+            "result": "audit-add",
+            "path": [
+              "id"
+            ]
+          }
+        },
+        "fields": {
+          "status": "verified"
+        }
+      },
+      "task_id": "audit",
+      "chat_id": "audit-chat"
+    },
+    {
+      "kind": "invoke",
+      "id": "notify",
+      "service_id": "mail",
+      "operation": "send_message",
+      "args": {
+        "to": [
+          "coordinator"
+        ],
+        "subject": "Catering resolved",
+        "body": "Cancelled with operator approval; handoff moved."
+      },
+      "task_id": "audit",
+      "chat_id": "audit-chat"
+    },
+    {
+      "kind": "report",
+      "message": "Cancellation complete; refund eligibility recorded; coordinator notified."
+    },
+    {
+      "kind": "done"
+    }
+  ]
+}

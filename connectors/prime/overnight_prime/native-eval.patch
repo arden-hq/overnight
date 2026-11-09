@@ -1,0 +1,304 @@
+--- a/crates/pa-core/src/eval_clock.rs
++++ b/crates/pa-core/src/eval_clock.rs
+@@ -0,0 +1,15 @@
++//! Optional process-scoped evaluation clock. Production uses the system clock.
++
++/// Return epoch milliseconds from the configured evaluation clock, or wall time.
++pub fn now_ms() -> u64 {
++    match std::env::var_os("PRIME_AGENT_EVAL_CLOCK") {
++        Some(path) => std::fs::read_to_string(path)
++            .expect("read evaluation clock")
++            .trim()
++            .parse()
++            .expect("evaluation clock must contain unsigned epoch milliseconds"),
++        None => std::time::SystemTime::now()
++            .duration_since(std::time::UNIX_EPOCH)
++            .map_or(0, |duration| duration.as_millis() as u64),
++    }
++}
+--- a/crates/pa-core/src/lib.rs
++++ b/crates/pa-core/src/lib.rs
+@@ -59,6 +59,7 @@
+ pub mod auth;
+ pub mod autonomous;
+ pub mod cron;
++pub mod eval_clock;
+ pub mod export_html;
+ pub mod goals;
+ pub mod kernel;
+--- a/crates/pa-core/src/cron/scheduler.rs
++++ b/crates/pa-core/src/cron/scheduler.rs
+@@ -41,10 +41,7 @@
+         None
+     }
+     fn now(&self) -> u64 {
+-        std::time::SystemTime::now()
+-            .duration_since(std::time::UNIX_EPOCH)
+-            .map(|duration| duration.as_millis() as u64)
+-            .unwrap_or_default()
++        crate::eval_clock::now_ms()
+     }
+     fn on_error(&self, _job: &super::AgentCronJob, _error: &str) {}
+ }
+--- a/crates/pa-core/src/cron/store/mod.rs
++++ b/crates/pa-core/src/cron/store/mod.rs
+@@ -56,10 +56,7 @@
+ }
+ 
+ pub(crate) fn now_millis() -> u64 {
+-    std::time::SystemTime::now()
+-        .duration_since(std::time::UNIX_EPOCH)
+-        .map(|duration| duration.as_millis() as u64)
+-        .unwrap_or_default()
++    crate::eval_clock::now_ms()
+ }
+ 
+ pub(crate) fn iso_from_millis(millis: u64) -> String {
+--- a/crates/pa-core/src/session_engine/host_requests.rs
++++ b/crates/pa-core/src/session_engine/host_requests.rs
+@@ -333,10 +333,7 @@
+ }
+ 
+ fn store_now() -> u64 {
+-    std::time::SystemTime::now()
+-        .duration_since(std::time::UNIX_EPOCH)
+-        .map(|duration| duration.as_millis() as u64)
+-        .unwrap_or_default()
++    crate::eval_clock::now_ms()
+ }
+ 
+ #[cfg(test)]
+--- a/crates/pa-daemon/src/util.rs
++++ b/crates/pa-daemon/src/util.rs
+@@ -1,6 +1,5 @@
+ //! Small shared helpers.
+ 
+-use std::time::{SystemTime, UNIX_EPOCH};
+ 
+ /// 12-char hex display id (port of `formatSessionDisplayId`): the last 12
+ /// hex characters of a random UUID.
+@@ -13,9 +12,7 @@
+ /// Milliseconds since the Unix epoch.
+ #[must_use]
+ pub fn now_ms() -> u64 {
+-    SystemTime::now()
+-        .duration_since(UNIX_EPOCH)
+-        .map_or(0, |d| d.as_millis() as u64)
++    pa_core::eval_clock::now_ms()
+ }
+ 
+ /// RFC 3339 / ISO 8601 UTC timestamp, matching `new Date().toISOString()`.
+--- a/crates/pa-daemon/src/scheduled_jobs.rs
++++ b/crates/pa-daemon/src/scheduled_jobs.rs
+@@ -251,6 +251,15 @@
+         }
+     }
+ 
++    /// Drive the existing scheduler at its injected clock, including normal dispatch/results.
++    pub(crate) async fn run_due(&self) -> anyhow::Result<usize> {
++        let scheduler = self.scheduler.lock().await.clone();
++        match scheduler {
++            Some(scheduler) => scheduler.run_due().await,
++            None => Ok(0),
++        }
++    }
++
+     pub(crate) fn store(&self) -> &Arc<AgentCronJobStore> {
+         &self.store
+     }
+@@ -279,7 +288,9 @@
+             Arc::clone(&self.store),
+             Arc::clone(&self.hooks),
+         ));
+-        scheduler.start().await;
++        if std::env::var_os("PRIME_AGENT_EVAL_CLOCK").is_none() {
++            scheduler.start().await;
++        }
+         *guard = Some(scheduler);
+         Ok(())
+     }
+--- a/crates/pa-daemon/src/worker/commands.rs
++++ b/crates/pa-daemon/src/worker/commands.rs
+@@ -11,6 +11,45 @@
+ use crate::protocol::DaemonResponse;
+ 
+ impl Worker {
++    /// Adapter-owned evaluation controls; unavailable without an explicit scoped clock.
++    async fn handle_eval_control(&self, payload: &Value) -> DaemonResponse {
++        if std::env::var_os("PRIME_AGENT_EVAL_CLOCK").is_none() {
++            return response_failure(None, "get_connection_state", "evaluation clock disabled", None);
++        }
++        match payload.get("overnightEval").and_then(Value::as_str) {
++            Some("advance") => {
++                if let Err(error) = self.scheduled.run_due().await {
++                    return response_failure(None, "get_connection_state", &error.to_string(), None);
++                }
++            }
++            Some(operation @ ("cancel" | "reset")) => {
++                if let Err(error) = self.close_rlm_children(crate::rlm_children::ChildCloseReason::Killed).await {
++                    return response_failure(None, "get_connection_state", &error.to_string(), None);
++                }
++                if let Err(error) = self.cancel_session_scheduled_jobs().await {
++                    return response_failure(None, "get_connection_state", &error.to_string(), None);
++                }
++                if operation == "reset" {
++                    let replacement = self.handle_new_session(payload).await;
++                    if !replacement.success {
++                        return replacement;
++                    }
++                }
++            }
++            Some("status") => {}
++            _ => return response_failure(None, "get_connection_state", "unknown evaluation control", None),
++        }
++        let mut response = self.handle_get_connection_state();
++        if let Some(data) = response.data.as_mut() {
++            data["overnightEval"] = json!({
++                "version": 1,
++                "nowMs": pa_core::eval_clock::now_ms(),
++                "nextWakeMs": self.scheduled.store().next_active_run_at(),
++            });
++        }
++        response
++    }
++
+     pub(crate) async fn dispatch(&self, command_type: &str, payload: &Value) -> DaemonResponse {
+         // Only operations that inspect or change historical branches need hydration.
+         // Cancellation is deliberately excluded: it must reach the live turn immediately.
+@@ -102,6 +141,9 @@
+             "clear_queue" => self.handle_clear_queue(),
+             "abort_and_clear_queue" => self.handle_abort_and_clear_queue(),
+             "get_last_assistant_text" => self.handle_get_last_assistant_text(),
++            "get_connection_state" if payload.get("overnightEval").is_some() => {
++                self.handle_eval_control(payload).await
++            }
+             "get_connection_state" => self.handle_get_connection_state(),
+             "get_mcp_connections" => self.handle_get_mcp_connections().await,
+             "set_mcp_static_token" => self.handle_set_mcp_static_token(payload).await,
+--- a/crates/pa-daemon/src/acp/daemon.rs
++++ b/crates/pa-daemon/src/acp/daemon.rs
+@@ -653,8 +653,12 @@
+ /// Prompt admission and cancel marking, in the client's frame order.
+ async fn frame_order_prefix(incoming: &Incoming, state: &Arc<Mutex<DaemonAcpState>>) -> FrameOrder {
+     match incoming {
+-        Incoming::Request { id, method, params } if method == "session/prompt" => {
+-            match admit_prompt(params, state).await {
++        Incoming::Request { id, method, params } if method == "session/prompt" || method == "_overnight/advance" => {
++            let mut params = params.clone();
++            if method == "_overnight/advance" {
++                params["overnightEvalAdvance"] = json!(true);
++            }
++            match admit_prompt(&params, state).await {
+                 Ok(admission_id) => FrameOrder::AdmitPrompt {
+                     id: id.clone(),
+                     params: params.clone(),
+@@ -1026,6 +1030,14 @@
+         "session/set_config_option" => {
+             handle_set_config_option(id, params, link, state, tx).await;
+         }
++        "_overnight/status" | "_overnight/reset" | "_overnight/cancel" => {
++            let operation = method.strip_prefix("_overnight/").expect("evaluation method");
++            let result = match eval_family(link, &binding.active_session_id, operation).await {
++                Ok(data) => jsonrpc::response(&id, &data),
++                Err(error) => super::internal_error(&id, &error.to_string()),
++            };
++            let _ = tx.send(result);
++        }
+         other => {
+             let _ = tx.send(jsonrpc::error_response(
+                 &id,
+@@ -1035,6 +1047,52 @@
+             ));
+         }
+     }
++}
++
++/// Walk only the native ownership roster. Each session keeps its own scheduler and queue.
++async fn eval_family(link: &Arc<DaemonLink>, root: &str, operation: &str) -> anyhow::Result<Value> {
++    let mut pending = std::collections::VecDeque::from([root.to_string()]);
++    let mut seen = std::collections::HashSet::new();
++    let mut root_state = Value::Null;
++    let mut next_wake: Option<u64> = None;
++    let mut active_work = false;
++    while let Some(session_id) = pending.pop_front() {
++        if !seen.insert(session_id.clone()) {
++            continue;
++        }
++        let mut rest = Map::new();
++        rest.insert("overnightEval".to_string(), json!(operation));
++        let response = link.request_until_close(DaemonCommand::GetConnectionState {
++            id: None,
++            active_session_id: session_id.clone(),
++            rest,
++        }).await?;
++        if !response.success {
++            anyhow::bail!(response.error.unwrap_or_else(|| "native family evaluation failed".to_string()));
++        }
++        let data = response.data.unwrap_or(Value::Null);
++        active_work |= data.get("isStreaming").and_then(Value::as_bool).unwrap_or(false)
++            || data.get("isCompacting").and_then(Value::as_bool).unwrap_or(false)
++            || data.pointer("/sessionActions/queuedCount").and_then(Value::as_u64).unwrap_or(0) > 0;
++        if let Some(wake) = data.pointer("/overnightEval/nextWakeMs").and_then(Value::as_u64) {
++            next_wake = Some(next_wake.map_or(wake, |previous| previous.min(wake)));
++        }
++        if session_id == root {
++            root_state = data;
++        }
++        if operation == "reset" || operation == "cancel" {
++            break; // Native retirement closes the entire child tree.
++        }
++        for child in fetch_rlm_children(link, &session_id).await? {
++            active_work |= child.get("status").and_then(Value::as_str) == Some("running");
++            if let Some(child_id) = child.get("activeSessionId").and_then(Value::as_str) {
++                pending.push_back(child_id.to_string());
++            }
++        }
++    }
++    root_state["overnightEval"]["nextWakeMs"] = json!(next_wake);
++    root_state["overnightEval"]["activeWork"] = json!(active_work);
++    Ok(root_state)
+ }
+ 
+ fn handle_initialize(id: &Value, params: &Value, product_version: &str, tx: &producer::FrameSink) {
+@@ -1419,6 +1477,7 @@
+     link: &Arc<DaemonLink>,
+     state: &Arc<Mutex<DaemonAcpState>>,
+ ) -> Value {
++    let eval_advance = params.get("overnightEvalAdvance").and_then(Value::as_bool) == Some(true);
+     let params = types::PromptParams::parse(&params);
+     let admitted = match types::AdmittedPrompt::parse(&params.prompt) {
+         Ok(admitted) => admitted,
+@@ -1442,7 +1501,15 @@
+         producer.finish_prompt(turn_id).await;
+         return cancelled_response(&id);
+     }
+-    let prompt = DaemonCommand::PromptAndWait {
++    let prompt = if eval_advance {
++        let mut rest = Map::new();
++        rest.insert("overnightEval".to_string(), json!("advance"));
++        DaemonCommand::GetConnectionState {
++            id: None,
++            active_session_id: hosted_daemon_session_id.clone(),
++            rest,
++        }
++    } else { DaemonCommand::PromptAndWait {
+         id: None,
+         active_session_id: hosted_daemon_session_id.clone(),
+         message: admitted.text,
+@@ -1474,8 +1541,14 @@
+             rlm_notice_nonce: None,
+         },
+         rest: Map::default(),
+-    };
+-    let response = match link.request_until_close(prompt).await {
++    }};
++    let response = if eval_advance {
++        eval_family(link, &hosted_daemon_session_id, "advance").await
++            .map(|data| crate::protocol::response_success(None, "get_connection_state", Some(data)))
++    } else {
++        link.request_until_close(prompt).await
++    };
++    let response = match response {
+         Ok(response) => response,
+         Err(error) => {
+             publish_error_boundary(&producer, turn_id).await;

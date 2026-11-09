@@ -1,0 +1,36 @@
+{
+  "id": "catering",
+  "attempts": 3,
+  "arms": [
+    {
+      "id": "authored"
+    },
+    {
+      "id": "do-nothing",
+      "agent": {
+        "kind": "scripted",
+        "actions": [
+          {
+            "kind": "done"
+          }
+        ]
+      }
+    }
+  ],
+  "cases": [
+    {
+      "id": "base",
+      "scenario": "../catering-chaos.json"
+    },
+    {
+      "id": "overrides",
+      "scenario": "../catering-chaos.json",
+      "overrides": "../catering-overrides.json"
+    },
+    {
+      "id": "adversarial",
+      "scenario": "../catering-chaos.json",
+      "variation": "../catering-adversarial-variation.json"
+    }
+  ]
+}

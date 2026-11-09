@@ -1,0 +1,10 @@
+# Images get code only: never scenarios, examples, tests, runs or local evidence.
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!src/
+!connectors/
+**/__pycache__
+**/node_modules
+**/.venv

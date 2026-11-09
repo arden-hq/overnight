@@ -1,0 +1,201 @@
+import os
+import shlex
+import shutil
+from pathlib import Path
+
+from pydantic import BaseModel, Field, model_validator
+
+from overnight.adapters.config import Factory, Launch, SessionContext
+from overnight.adapters.evidence import source_identity
+from overnight.adapters.files import write_private_json
+from overnight.adapters.provider import Provider, api_key, endpoint, provider_record
+from overnight.domain.contracts import Contract, JsonObject
+from overnight.execution.harness import Capabilities
+from overnight.execution.provenance import ModelConfiguration
+from overnight_pi.profile import NativeProfile
+
+
+class PackageMetadata(BaseModel):
+    version: str
+
+
+class PiOptions(Contract):
+    runtime: Path = Field(strict=False)
+    provider: Provider = "openrouter"
+    native: NativeProfile = Field(default_factory=NativeProfile)
+    model: str = "openai/gpt-6-luna"
+    reasoning: bool = False
+    max_tokens: int = Field(default=2048, ge=1, le=4096)
+    max_requests: int = Field(default=12, ge=1, le=80)
+    max_request_bytes: int = Field(default=262144, ge=1024, le=1048576)
+    input_usd_per_million: float = Field(gt=0)
+    output_usd_per_million: float = Field(gt=0)
+    max_cost_usd: float = Field(default=1, gt=0, le=5)
+
+    @model_validator(mode="after")
+    def require_affordable_limits(self):
+        if self.native.thinking != "off" and not self.reasoning:
+            raise ValueError("thinking requires a reasoning-capable model definition")
+        prompt_bound = self.max_request_bytes + 4096
+        per_request = (
+            prompt_bound * self.input_usd_per_million
+            + self.max_tokens * self.output_usd_per_million
+        ) / 1_000_000
+        if self.max_requests * per_request > self.max_cost_usd:
+            raise ValueError("request limits exceed the configured cost bound")
+        return self
+
+
+def _reasoning(options: PiOptions) -> JsonObject:
+    # A provider effort is what Pi sends with thinking off. Pi sends an effort only for a
+    # reasoning model, so the model is declared reasoning-capable.
+    off = endpoint(options.provider).reasoning_effort
+    if off is None:
+        return {"reasoning": options.reasoning}
+    return {
+        "reasoning": True,
+        "thinkingLevelMap": {"off": off},
+        "compat": {"supportsReasoningEffort": True},
+    }
+
+
+async def prepare(context: SessionContext) -> Launch:
+    options = PiOptions.model_validate(context.options)
+    provider = endpoint(options.provider)
+    key = provider.api_key_env
+    secret = api_key(provider)
+    runtime = options.runtime.resolve()
+    node = shutil.which("node")
+    if node is None:
+        raise ValueError("Pi requires Node.js")
+    modules = runtime / "node_modules"
+    pi = modules / "@earendil-works/pi-coding-agent/dist/bundle/cli.js"
+    acp = modules / "pi-acp/dist/index.js"
+    if not pi.is_file() or not acp.is_file():
+        raise ValueError("install the pinned Pi runtime with npm ci first")
+    root = context.directory
+    workspace = root / "workspace"
+    workspace.mkdir(mode=0o700)
+    agent = root / "pi"
+    agent.mkdir(mode=0o700)
+    bindings = root / "bindings"
+    bindings.mkdir(mode=0o700)
+    binding = root / "tools.mjs"
+    source = Path(__file__).with_name("tools.mjs").read_text()
+    source = source.replace(
+        "@modelcontextprotocol/sdk/",
+        (modules / "@modelcontextprotocol/sdk/dist/esm").as_uri() + "/",
+    )
+    descriptor = os.open(binding, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w") as output:
+        output.write(source)
+    counter = root / "requests.count"
+    os.close(os.open(counter, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+    write_private_json(
+        root / "tools.json",
+        {
+            "request_counter": str(counter),
+            "binding_receipts": str(bindings),
+            "chat_id": context.chat_id,
+            "endpoint": context.endpoint,
+            "token": context.token,
+            "operations": {
+                service: [operation.model_dump(mode="json") for operation in operations]
+                for service, operations in context.operations.items()
+            },
+        },
+    )
+    write_private_json(
+        agent / "settings.json",
+        {
+            "quietStartup": True,
+            "compaction": {"enabled": options.native.compaction},
+            "retry": {"enabled": False},
+            "defaultTools": [str(tool) for tool in options.native.builtin_tools],
+        },
+    )
+    write_private_json(
+        agent / "models.json",
+        {
+            "providers": {
+                "overnight": {
+                    "baseUrl": provider.base_url,
+                    "api": "openai-completions",
+                    "apiKey": f"${key}",
+                    "authHeader": True,
+                    "models": [
+                        {
+                            "id": options.model,
+                            "name": options.model,
+                            **_reasoning(options),
+                            "input": ["text"],
+                            "contextWindow": 262144,
+                            "maxTokens": options.max_tokens,
+                        }
+                    ],
+                }
+            }
+        },
+    )
+    command = [
+        node,
+        str(pi),
+        "--provider",
+        "overnight",
+        "--model",
+        options.model,
+        *options.native.arguments(),
+        "--extension",
+        str(binding),
+    ]
+    launcher = root / "pi-launch"
+    descriptor = os.open(launcher, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o700)
+    with os.fdopen(descriptor, "w") as output:
+        output.write(f'#!/bin/sh\nexec {shlex.join(command)} "$@"\n')
+    return Launch(
+        adapter_code=source_identity(Path(__file__).parent, "0.1.0"),
+        runtime_code=source_identity(
+            modules,
+            ";".join(
+                f"{name}={PackageMetadata.model_validate_json((modules / name / 'package.json').read_bytes()).version}"
+                for name in (
+                    "@earendil-works/pi-coding-agent",
+                    "pi-acp",
+                    "@modelcontextprotocol/sdk",
+                )
+            ),
+        ),
+        model=ModelConfiguration(
+            name=options.model,
+            uses_runtime_defaults=True,
+            settings={
+                "provider": provider_record(options.provider),
+                "max_tokens": options.max_tokens,
+                "max_requests": options.max_requests,
+                "max_request_bytes": options.max_request_bytes,
+                "max_cost_usd": options.max_cost_usd,
+                "input_usd_per_million": options.input_usd_per_million,
+                "output_usd_per_million": options.output_usd_per_million,
+                "native": options.native.model_dump(mode="json"),
+            },
+        ),
+        command=[node, str(acp)],
+        cwd=workspace,
+        env={
+            "HOME": str(root),
+            "PI_CODING_AGENT_DIR": str(agent),
+            "PI_ACP_PI_COMMAND": str(launcher),
+            "PI_OFFLINE": "1",
+            "PI_TELEMETRY": "0",
+            "OVERNIGHT_PI_TOOLS": str(root / "tools.json"),
+            "OVERNIGHT_PI_MAX_REQUESTS": str(options.max_requests),
+            "OVERNIGHT_PI_MAX_BYTES": str(options.max_request_bytes),
+            key: secret,
+        },
+    )
+
+
+adapter = Factory(
+    prepare=prepare,
+    capabilities=Capabilities(chat_isolation=True, cancel=True, reset_scope="chat"),
+)

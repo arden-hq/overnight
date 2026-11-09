@@ -1,0 +1,96 @@
+{
+  "id": "shared-world-episode",
+  "start_time": 0,
+  "horizon": 30,
+  "max_steps": 12,
+  "tasks": [
+    {
+      "id": "supplier-followup",
+      "chat_id": "supplier",
+      "message": "Confirm that the supplier follow-up is complete.",
+      "deadline": 20,
+      "checks": {
+        "outcomes": [
+          {
+            "source": "agent_report",
+            "op": "eq",
+            "path": [
+              "message"
+            ],
+            "value": "Acknowledged"
+          }
+        ]
+      }
+    },
+    {
+      "id": "venue-followup",
+      "chat_id": "venue",
+      "message": "Confirm that the venue follow-up is complete.",
+      "start_at": 2,
+      "deadline": 25,
+      "checks": {
+        "outcomes": [
+          {
+            "source": "agent_report",
+            "op": "eq",
+            "path": [
+              "message"
+            ],
+            "value": "Acknowledged"
+          }
+        ]
+      }
+    }
+  ],
+  "actors": [
+    {
+      "id": "operator",
+      "role": "operator"
+    },
+    {
+      "id": "agent",
+      "role": "agent",
+      "read_services": [
+        "mail"
+      ],
+      "operations": {
+        "mail": [
+          "list_messages"
+        ]
+      }
+    }
+  ],
+  "services": [
+    {
+      "id": "mail",
+      "kind": "mail",
+      "state": {
+        "messages": []
+      }
+    }
+  ],
+  "agent": {
+    "kind": "scripted",
+    "actions": [
+      {
+        "kind": "report",
+        "message": "Acknowledged"
+      },
+      {
+        "kind": "done"
+      }
+    ]
+  },
+  "operator": {
+    "policy": {
+      "default": "deny",
+      "rules": []
+    },
+    "steps": []
+  },
+  "checks": {
+    "outcomes": [],
+    "forbidden": [],
+    "collateral": []
+  }
+}
