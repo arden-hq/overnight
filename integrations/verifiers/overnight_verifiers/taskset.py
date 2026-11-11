@@ -1,5 +1,3 @@
-"""Rows from a generated scenario family, after Overnight's split check passes."""
-
 import json
 import os
 import subprocess
@@ -19,14 +17,10 @@ class OvernightError(Exception):
     rollout errors and a trainer drops it."""
 
 
-# A failed policy call with one of these statuses, or with none (a transport fault), is the
-# engine's: it says nothing about the policy. Any other 4xx answers the agent's own request.
 ENGINE_STATUSES = frozenset({408, 429})
 
 
 def engine_fault(trace: vf.Trace) -> str | None:
-    """The first policy call on `trace` that failed on the engine's side: a 5xx, 408, 429, a
-    timeout or a transport error. None when every call succeeded or failed on its request."""
     for call in trace.calls:
         error = call.error
         if error is None:
@@ -37,16 +31,10 @@ def engine_fault(trace: vf.Trace) -> str | None:
     return None
 
 
-# Set on `trace.info` when the rollout was cancelled, for example by its agent deadline, with a
-# policy call the harness got no answer to: still open, or given up on (`PolicyForwarder`).
 UNANSWERED = "overnight_unanswered_calls"
 
 
 def overnight_result(trace: vf.Trace) -> dict[str, Any] | None:
-    """The worker's result, or None for a rollout that ran out of time on the policy's side:
-    verifiers' agent deadline expired with every policy call answered and no engine fault, so
-    the policy was slow or looping. Any other rollout without a result is not the policy's
-    doing and raises."""
     result = trace.info.get("overnight")
     if result is not None:
         return result
@@ -90,7 +78,6 @@ def has_persona(scenario: dict[str, Any]) -> bool:
 
 
 def check_split(python: str, family: Path, held_out: list[Path]) -> None:
-    """Overnight's own split check; a family that overlaps the held-out cases loads nothing."""
     if not python:
         raise ValueError("set OVERNIGHT_PYTHON or --env.taskset.python to Overnight's interpreter")
     command = [python, "-m", "overnight.families.split", str(family)]
@@ -135,7 +122,6 @@ class OvernightTask(vf.Task[OvernightData]):
         if failure is not None and failure["kind"] == "agent":
             return 0.0
         if result["score"] is None:
-            # Never coerce an ungraded episode to 0: the raise drops it from training.
             raise OvernightError(f"Overnight returned no score (verdict {result['verdict']})")
         return float(result["score"])
 

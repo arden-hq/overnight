@@ -105,7 +105,6 @@ class WorldToolServer:
                 )
                 await stack.enter_async_context(manager.run())
 
-                # Bind the manager now; a closure over the loop variable misroutes services.
                 routes.append(
                     Route(
                         f"/{service}",

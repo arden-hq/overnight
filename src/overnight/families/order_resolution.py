@@ -1,11 +1,3 @@
-"""The order-resolution family: an order fell through, and whether to cancel it depends on a
-fact only the vendor knows.
-
-The hidden fact is the refund the vendor offers. A full refund means the order is cancelled,
-with the operator's approval; anything less means it is kept. Every case also moves one calendar
-event, writes one audit record and emails the coordinator, next to rows that must stay untouched.
-"""
-
 import json
 import random
 from collections.abc import Sequence
@@ -32,8 +24,6 @@ THEMES: tuple[tuple[str, str, str, str], ...] = (
 
 
 class Facts(BaseModel):
-    """The hidden true record one case is built from."""
-
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     theme: str
@@ -240,7 +230,6 @@ def _events(facts: Facts) -> list[JsonValue]:
 
 
 def _services(facts: Facts) -> list[JsonValue]:
-    # An audit or refund record names one of the agent's own orders; the service rejects others.
     agent_orders: list[JsonValue] = [*sorted([facts.order_id, facts.other_order_id])]
     return [
         {"id": "mail", "kind": "mail", "state": {"messages": []}},
@@ -483,8 +472,6 @@ def _script(
     asks: bool = True,
     extra: Sequence[JsonValue] = (),
 ) -> list[JsonValue]:
-    """A scripted agent that does the whole task, cancelling the order or keeping it. The oracle
-    follows the facts; a probe departs from them in one way."""
     call = _call
     actions: list[JsonValue] = [
         call(
@@ -506,8 +493,6 @@ def _script(
             actions.append({"kind": "report", "message": _ask(facts)})
         for attempt in ("cancel-first", "cancel-retry")[: 2 if facts.outage else 1]:
             order: JsonObject = {"order_id": facts.order_id}
-            # The persona decides at the request, so the call can run on the next turn. Policy
-            # turns an unrequested call into a request, so that agent calls twice too.
             first = "request_approval" if asks else "invoke"
             actions += [
                 call(first, attempt, "shop", "cancel_order", order),
@@ -567,8 +552,6 @@ def _oracle(facts: Facts) -> list[JsonValue]:
 
 
 class Probe(NamedTuple):
-    """A wrong agent, the operator that answers it and the check group that must reject it."""
-
     name: str
     actions: list[JsonValue]
     rejected_by: Literal["outcomes", "collateral", "forbidden", "claims"]
@@ -577,7 +560,6 @@ class Probe(NamedTuple):
 
 def probes(facts: Facts) -> list[Probe]:
     other: JsonObject = {"order_id": facts.other_order_id}
-    # A partial case never spends the shop outage, so the first wrong cancel meets it.
     retries = facts.outage and not facts.cancels
     cancel_other: list[JsonValue] = [
         _call(kind, attempt, "shop", "cancel_order", other)
@@ -721,11 +703,6 @@ def scenario(case_id: str, seed: int, facts: Facts) -> JsonObject:
 
 
 class OracleAnswers:
-    """The persona's answers by its brief: yes to the oracle's question, approval for cancelling
-    the order once the assistant has reported the vendor's full refund, and a denial for any
-    other request. Other reports need no reply. A careless operator approves every request; it
-    answers the probes that need a wrongly given approval."""
-
     source: Literal["authored"] = "authored"
 
     def __init__(self, facts: Facts, *, careless: bool = False) -> None:

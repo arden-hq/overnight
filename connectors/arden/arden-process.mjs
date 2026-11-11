@@ -61,8 +61,6 @@ export class ArdenProcess {
     this.evidence = evidence
     this.commandNumber = 0
     this.pending = new Map()
-    // The child leads its own process group, so the parent-death fallback and
-    // close() reach grandchildren such as stdio MCP and tool processes.
     this.onParentExit = () => killGroup(this.child?.pid, "SIGKILL")
   }
 
@@ -87,8 +85,7 @@ export class ArdenProcess {
       closeSync(serverLog)
     }
     process.once("exit", this.onParentExit)
-    // Failed spawns emit error + close without exit. Close is the lifetime end
-    // for both successful children and failed spawn attempts.
+    // Node: a failed spawn emits error + close without exit, so close is the lifetime end.
     this.exited = new Promise((resolveExit) =>
       this.child.once("close", () => {
         this.closed = true
@@ -189,8 +186,6 @@ export class ArdenProcess {
     if (!this.child) return
     killGroup(this.child.pid, "SIGTERM")
     await Promise.race([this.exited, sleep(5_000, undefined, { ref: false })])
-    // Grandchildren can outlive the direct child; the group id stays valid
-    // while any member lives, so always finish with a group SIGKILL.
     killGroup(this.child.pid, "SIGKILL")
     if (!this.closed) {
       await Promise.race([this.exited, sleep(1_000, undefined, { ref: false })])

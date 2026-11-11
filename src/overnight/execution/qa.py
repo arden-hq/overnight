@@ -79,7 +79,6 @@ def _has_persona(scenario: JsonObject) -> bool:
 
 
 def _sham_operator(scenario: JsonObject) -> OperatorTransport | None:
-    """A sham probe's persona gets no help: no replies and every approval denied."""
     return QaTransport() if _has_persona(scenario) else None
 
 
@@ -183,9 +182,6 @@ def _oracle(
 def _sham(
     name: str, result: RunResult, must_be_rejected: bool, *, each_task: bool = True
 ) -> ProbeResult:
-    """Grade a probe that must not pass. A sham does no work, so with ``each_task`` every task
-    with outcomes must reject it on its own; an authored probe may do some tasks right, so its
-    run needs only one rejection."""
     verdict = str(result.verdict["verdict"])
     tasks = _task_verdicts(result)
     rejections = sum(_rejections(item) for item in (result.verdict, *tasks))

@@ -273,7 +273,6 @@ function Grants({ services, value, onChange }: { services: string[]; value: unkn
 }
 
 const STEP_KINDS = ["message", "status", "approve", "deny", "policy"];
-// A persona decides approvals itself, so its scenario takes no timed approve or deny steps.
 const PERSONA_STEP_KINDS = ["message", "status", "policy"];
 const MODES = ["allow", "approval", "deny"];
 
@@ -482,7 +481,6 @@ function BriefLines({ label, lines }: { label: string; lines: string[] }) {
   );
 }
 
-// Read-only: the persona answers every report and approval from these briefs at run time.
 function PersonaBriefs({ persona }: { persona: Json }) {
   const briefs = arr(persona.briefs).map(obj);
   const model = obj(persona.model);
@@ -539,8 +537,6 @@ function checkTarget(check: Json): string {
 const copy = (value: unknown): unknown => JSON.parse(JSON.stringify(value));
 const isPattern = (value: unknown) => typeof value === "object" && value !== null && !Array.isArray(value) && Object.keys(value).length > 0;
 
-/** Switch a check to another test so the result is a check the contract accepts. Fields the new
- * test cannot hold go to ``stash`` and come back when a later switch needs them again. */
 function setCheckOp(check: Json, op: string | undefined, stash: Json) {
   const from = check.op;
   if (from === "before") {
@@ -580,7 +576,6 @@ function setCheckOp(check: Json, op: string | undefined, stash: Json) {
 export function ChecksSection({ doc, edit }: Props) {
   const tasks = arr(doc.tasks).map(obj);
   const [scope, setScope] = useState<string>("scenario");
-  // Fields a check gave up when its test changed, by scope, layer and index; cleared on removal.
   const stashes = useRef(new Map<string, Json>());
   const stash = (key: string, i: number) => {
     const id = `${scope}/${key}/${i}`;

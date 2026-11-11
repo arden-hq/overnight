@@ -59,7 +59,6 @@ export function Sidebar({ route, view, theme, onTheme }: { route: Route; view: S
     try {
       localStorage.setItem("overnight-sidebar", collapsed ? "collapsed" : "open");
     } catch {
-      /* storage blocked */
     }
   }, [collapsed]);
   const { scenarios, runs } = useCatalog();

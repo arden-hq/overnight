@@ -228,8 +228,6 @@ class Connector:
         return await self.run_turn(observation)
 
     async def run_turn(self, observation: JsonObject) -> ActionReply:
-        """Wait for the native turn's next world call or its end. A turn that ends silently is
-        followed at once by a turn for notifications that arrived meanwhile."""
         assert self.bridge is not None
         while True:
             assert self.turn is not None
@@ -255,7 +253,6 @@ class Connector:
             self.start_turn(observation, new)
 
     def new_notifications(self, observation: JsonObject) -> list[JsonObject]:
-        """The observation's notifications that no native prompt has carried yet."""
         return [
             notification
             for notification in objects_contract.validate_python(observation["notifications"])
@@ -322,10 +319,6 @@ class Connector:
             self.meter.begin()
 
     def start_turn(self, observation: JsonObject, new: list[JsonObject]) -> None:
-        """Prompt the native session with only the notifications it has not been given yet;
-        operator messages reach it as notifications too. The session's first prompt also carries
-        the instructions and the full observation. Later prompts carry only the time, because the
-        session already holds the tools, its earlier results and the world view."""
         assert self.connection is not None and self.client.session_id is not None
         ids = [str(notification["id"]) for notification in new]
         first = not self.session_prompted
@@ -391,7 +384,6 @@ class Connector:
             self.meter.add(usage.input_tokens, usage.output_tokens, None)
 
     async def finish_turn(self) -> JsonObject | None:
-        """Close the ended native turn; return its report, or None when it ended silently."""
         assert self.turn is not None
         try:
             result = self.turn.result()

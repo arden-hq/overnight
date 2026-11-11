@@ -111,7 +111,6 @@ LOCAL_TOOL_TYPES = frozenset({"function", "custom"})
 MEDIA_TYPES = frozenset({"image_url", "input_image", "input_file", "input_audio", "file"})
 
 
-# Fields a token-returning engine adds that the harness never asked for.
 CAPTURE_RESPONSE_FIELDS = frozenset({"prompt_token_ids", "prompt_logprobs", "kv_transfer_params"})
 
 
@@ -164,8 +163,6 @@ class UnansweredCall(Contract):
 
 
 class Capture(Contract):
-    """A capture file read back: the answered calls and the unanswered ones, each in order."""
-
     calls: list[CapturedCall]
     unanswered: list[UnansweredCall]
 
@@ -184,8 +181,6 @@ def run_capture() -> Path | None:
 
 
 def read_capture(path: Path) -> Capture:
-    """What a capturing relay stored at `path`. A missing file holds no calls; a line that is
-    neither a `CapturedCall` nor an `UnansweredCall` raises `ValueError`."""
     lines = path.read_text().splitlines() if path.exists() else []
     entries = [captured_line.validate_json(line) for line in lines if line]
     return Capture(
@@ -201,7 +196,6 @@ def _append(capture: Path, entry: CapturedCall | UnansweredCall) -> None:
 
 
 def _captured_call(request: int, completion: JsonObject) -> CapturedCall | None:
-    """The tokens of a non-streamed completion with token IDs, or None when they are missing."""
     choices = completion.get("choices")
     if not isinstance(choices, list) or len(choices) != 1 or not isinstance(choices[0], dict):
         return None
@@ -243,7 +237,6 @@ def _captured_call(request: int, completion: JsonObject) -> CapturedCall | None:
 
 
 def _harness_completion(completion: JsonObject) -> JsonObject:
-    """The completion without the token data the relay asked for on the harness's behalf."""
     choices = completion.get("choices")
     return {
         key: value for key, value in completion.items() if key not in CAPTURE_RESPONSE_FIELDS
@@ -258,7 +251,6 @@ def _harness_completion(completion: JsonObject) -> JsonObject:
 
 
 def _replayed_stream(completion: JsonObject, include_usage: bool) -> Iterator[str]:
-    """A chat-completions event stream that carries the same message as `completion`."""
     head: JsonObject = {
         key: completion[key]
         for key in ("id", "created", "model", "system_fingerprint")
@@ -307,7 +299,6 @@ class RequestBudget(Contract):
 
     @model_validator(mode="after")
     def bound_native_requests(self):
-        # A request of n bytes holds at most n + 4096 input tokens, framing included.
         bound = (
             self.max_requests
             * (
@@ -322,12 +313,6 @@ class RequestBudget(Contract):
 
 
 def upstream_payload(provider: Provider, payload: JsonObject, max_tokens: int) -> JsonObject:
-    """Bound the output of a Chat Completions request and apply the provider's dialect.
-
-    OpenRouter takes `max_tokens` and its own `reasoning` and `usage` fields. A configured endpoint
-    takes the standard `max_completion_tokens`, drops those OpenRouter-only fields, and, when the
-    provider sets a reasoning effort, sends that effort in place of the harness's.
-    """
     payload = {key: value for key, value in payload.items() if key != "max_completion_tokens"}
     if provider == "openrouter":
         return payload | {"max_tokens": max_tokens}
@@ -342,8 +327,6 @@ def upstream_payload(provider: Provider, payload: JsonObject, max_tokens: int) -
 
 
 def responses_payload(provider: Provider, payload: JsonObject, max_tokens: int) -> JsonObject:
-    """Bound the output of a Responses request; a provider's reasoning effort replaces the
-    harness's."""
     payload = payload | {"max_output_tokens": max_tokens}
     if provider != "openrouter" and provider.reasoning_effort is not None:
         reasoning = payload.get("reasoning")
@@ -362,7 +345,6 @@ def _hosted_tools(payload: JsonObject) -> list[str]:
 
 
 def _media(value: JsonValue) -> bool:
-    """Whether any part is an image, file or audio, which the provider bills beyond its bytes."""
     if isinstance(value, list):
         return any(_media(item) for item in value)
     if isinstance(value, dict):
@@ -380,7 +362,6 @@ def _stored_context(payload: JsonObject) -> bool:
 def _usage(
     api: Api, message: JsonObject
 ) -> tuple[JsonValue, JsonValue, tuple[JsonValue, ...] | None]:
-    """The generation ID, raw usage and (input, output, cost) of one streamed event."""
     if api == "chat":
         usage = message.get("usage")
         fields = usage if isinstance(usage, dict) else {}
@@ -525,7 +506,6 @@ class ProviderRelay:
             return await self.forwarded(request, url, payload, api, request_number)
         except HarnessLeft:
             self.record({"kind": "provider_abandoned", "request": request_number})
-            # No one is left to read it.
             return Response(status_code=499)
 
     async def forwarded(
@@ -587,7 +567,6 @@ class ProviderRelay:
     async def captured(
         self, request: Request, url: str, payload: JsonObject, request_number: int, capture: Path
     ):
-        """Call the engine once without streaming, store the call's tokens, answer the harness."""
         options = payload.get("stream_options")
         include_usage = isinstance(options, dict) and options.get("include_usage") is True
         streamed = payload.get("stream") is True
@@ -607,7 +586,6 @@ class ProviderRelay:
                 ),
             )
         except BaseException:
-            # Failed, timed out, or abandoned by the harness before the engine answered.
             _append(capture, UnansweredCall(request=request_number, reason="engine_unreachable"))
             if self.meter is not None:
                 self.meter.add_unmeasured()
@@ -651,7 +629,6 @@ class ProviderRelay:
         return JSONResponse(answer)
 
     def unanswered(self, upstream: httpx.Response, body: JsonObject | None) -> JSONResponse:
-        """Pass a provider error on, or refuse a success that carried no completion."""
         if self.meter is not None:
             if upstream.is_client_error:
                 self.meter.end()
@@ -665,7 +642,6 @@ class ProviderRelay:
         )
 
     def count(self, completion: JsonObject) -> None:
-        """Record and meter one non-streamed completion."""
         identifier, usage, tokens = _usage("chat", completion)
         if identifier is not None:
             self.record({"kind": "provider_generation", "id": identifier})

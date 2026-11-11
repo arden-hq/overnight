@@ -25,8 +25,6 @@ def test_an_unencodable_name_is_refused_not_crashed():
 
 
 def test_the_policy_port_reaches_one_host_port_and_nothing_else(monkeypatch):
-    """Training only: the proxy's policy port passes bytes to the one configured port, while its
-    CONNECT port keeps refusing the host."""
     import asyncio
     import socket
 
@@ -46,7 +44,6 @@ def test_the_policy_port_reaches_one_host_port_and_nothing_else(monkeypatch):
         policy = await asyncio.start_server(echo, "127.0.0.1", 0)
         policy_port = policy.sockets[0].getsockname()[1]
         proxy_port, listen_port = free_port(), free_port()
-        # The container's fixed policy port may be taken on the host; any free one serves here.
         monkeypatch.setattr(egress_proxy, "POLICY_LISTEN_PORT", listen_port)
         proxy = asyncio.create_task(
             egress_proxy.serve(proxy_port, frozenset(), ("127.0.0.1", policy_port))

@@ -1,14 +1,3 @@
-"""Overnight episodes as OpenEnv loop-owning sessions, captured by OpenEnv's proxy.
-
-TRL's `HarnessAsyncGRPOTrainer` creates one session per rollout from a `ResourceSessionFactory`,
-waits for it, reads its `TrainingTrace` and asks `verify()` for the reward. Here each session is one
-Overnight episode: the factory mints a capture session on OpenEnv's proxy, whose id is the agent's
-API key, and starts Overnight's rollout worker with the proxy as the policy endpoint. The agent's
-harness runs unchanged; every call it makes to the policy is recorded by the proxy, outside the
-agent, with the engine's token ids and logprobs. Overnight runs the world, the operator and the
-checks, and its score is the reward.
-"""
-
 import asyncio
 import contextlib
 import json
@@ -47,7 +36,6 @@ from overnight_openenv.cases import Case, family_cases, overnight_python
 
 POLICY_KEY = "OVERNIGHT_POLICY_KEY"
 STOP_SECONDS = 20.0
-# The key variable of Overnight's `openrouter` provider preset.
 OPENROUTER_KEY = "OPENROUTER_API_KEY"
 EPISODE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
@@ -58,11 +46,6 @@ class OvernightError(RuntimeError):
 
 
 class InFlight:
-    """ASGI middleware that counts, per API key, the requests still being answered and the
-    requests whose client disconnected before its answer was sent. A harness can give up on a
-    call while the proxy still waits on the engine, and the deadline can cut one; either is a
-    call the engine had not answered in time, even when it answers later."""
-
     def __init__(self, app: Any) -> None:
         self.app = app
         self.open: Counter[str] = Counter()
@@ -100,8 +83,6 @@ class InFlight:
         async def sending(message: Any) -> None:
             nonlocal answered
             if message["type"] == "http.response.body" and not message.get("more_body"):
-                # An answer the engine gave after its client left reached no one: the server
-                # still sends it, so it counts only when the client was there to receive it.
                 answered = not disconnected.is_set()
             await send(message)
 
@@ -115,21 +96,14 @@ class InFlight:
             with self.lock:
                 self.open[key] -= 1
                 if disconnected.is_set() and not answered:
-                    # Given up by its client before the answer: still the engine's call.
                     self.abandoned[key] += 1
 
     def unanswered(self, key: str) -> int:
-        """The requests under `key` still waiting for their answer, or given up by their client
-        before it."""
         with self.lock:
             return max(0, self.open[key]) + self.abandoned[key]
 
 
 class CaptureProxy:
-    """OpenEnv's capture proxy on a loopback port of this process. Its session routes are closed
-    by a random admin key; this process reads the registry directly. A contained agent reaches the
-    port through the rollout worker's policy-port forward."""
-
     def __init__(self, *, max_output_tokens: int | None) -> None:
         self.app = create_app(admin_key=secrets.token_hex(16), max_output_tokens=max_output_tokens)
         self.in_flight = InFlight(self.app)
@@ -152,7 +126,6 @@ class CaptureProxy:
         return f"http://127.0.0.1:{self.port}/v1"
 
     def open(self, upstream: Upstream, **options: Any) -> Session:
-        """A capture session for one rollout, on an engine probed once per engine and model."""
         client, level = asyncio.run(self.app.state.upstreams.resolve(upstream))
         upstream = replace(upstream, model=client.served_model or upstream.model)
         return self.app.state.registry.create(upstream=upstream, capture_level=level, **options)
@@ -215,10 +188,7 @@ class OvernightSession(ResourceSession):
         self.reward: float | None = None
         self.result: dict[str, Any] = {}
 
-    # --- ResourceSession ---------------------------------------------------------------------
-
     def initial_messages(self) -> list[Message]:
-        # A label for logs: Overnight's runner sends the agent its actual messages.
         return [{"role": "user", "content": self.case.id}]
 
     def list_tools(self) -> list[Tool]:
@@ -228,7 +198,6 @@ class OvernightSession(ResourceSession):
         return ToolResult(error="the agent owns its loop inside Overnight's episode")
 
     def verify(self, transcript: list[Message], final_state: Any | None = None) -> VerifyResult:
-        """Overnight's reward, or None before a usable episode: an unscored rollout, never 0."""
         return VerifyResult(
             env_reward=self.reward,
             done=self.reward is not None,
@@ -237,8 +206,6 @@ class OvernightSession(ResourceSession):
         )
 
     def close(self) -> None:
-        """Stop the worker if it still runs, for example when the trainer stops, and drop the
-        capture session."""
         with self._lock:
             self._closed = True
             process = self._process
@@ -246,11 +213,8 @@ class OvernightSession(ResourceSession):
             _stop(process)
         self._proxy.close(self._capture)
 
-    # --- loop-owning ---------------------------------------------------------------------------
-
     def wait_for_completion(self, timeout_s: float | None = None) -> int:
         result = self._run_worker(self._timeout_s if timeout_s is None else timeout_s)
-        # An engine fault decides the episode whatever the agent did next.
         if self._capture.upstream_errors:
             raise OvernightError(
                 f"{self._capture.upstream_errors} policy call(s) failed at the engine"
@@ -258,8 +222,6 @@ class OvernightSession(ResourceSession):
         if result is None:
             self.result = {"episode": self._request["id"], "timed_out": True}
             self.reward = 0.0
-            # TRL's timed-out path trains the capture, so it gets only a trainable one; an
-            # untrainable capture of a failed agent TRL drops.
             if self._trainable() is None:
                 raise TimeoutError(f"the agent ran past {self._timeout_s} seconds")
             return 1
@@ -285,8 +247,6 @@ class OvernightSession(ResourceSession):
             raise OvernightError(f"Overnight returned no score (verdict {result['verdict']})")
         if not self._capture.graph.stats()["n_turns"]:
             raise OvernightError("the episode was graded but no policy call reached the proxy")
-        # TRL stops training on a graded episode whose capture it cannot train on, for example
-        # with a fatal capture finding; the episode says nothing about the policy, so drop it.
         problem = self._trainable()
         if problem is not None:
             raise OvernightError(f"the capture cannot be trained on: {problem}")
@@ -294,7 +254,6 @@ class OvernightSession(ResourceSession):
         return 0
 
     def _trainable(self) -> str | None:
-        """Why TRL would refuse this capture, as it reads it, or None."""
         try:
             self.fetch_training_trace()
         except (ValueError, TypeError, KeyError) as error:
@@ -308,9 +267,6 @@ class OvernightSession(ResourceSession):
         return to_training_trace(self._capture.graph, document)
 
     def _run_worker(self, timeout_s: float) -> dict[str, Any] | None:
-        """The worker's result, or None when the agent ran out of time with every policy call
-        answered. A policy call still unanswered when the episode ended, cut by the deadline or
-        given up by the harness, was the engine's to answer, so it raises `OvernightError`."""
         with self._lock:
             if self._closed:
                 raise OvernightError("the session was closed before it ran")
@@ -349,9 +305,6 @@ class OvernightSession(ResourceSession):
 
 
 def _stop(process: subprocess.Popen[bytes], drain: bool = False) -> None:
-    """Interrupt the worker so its runner removes the episode's processes and containers, then
-    kill what is left of its process group. `drain` reads its pipes meanwhile; only the thread
-    that started it may."""
     if process.poll() is not None:
         return
     with contextlib.suppress(ProcessLookupError):
@@ -444,7 +397,6 @@ class OvernightSessionFactory(ResourceSessionFactory[OvernightSession]):
         self._lock = threading.Lock()
 
     def __getstate__(self) -> dict[str, Any]:
-        # TRL pickles the factory into its rollout process; the proxy and lock start there anew.
         state = dict(self.__dict__)
         state.update(_proxy=None, _lock=None)
         return state
@@ -502,7 +454,6 @@ class OvernightSessionFactory(ResourceSessionFactory[OvernightSession]):
                 "provider": {"base_url": proxy.base_url, "api_key_env": POLICY_KEY},
                 "model": self.model,
             },
-            # The proxy is the record.
             "capture": False,
         }
         if case.has_persona:
@@ -510,8 +461,6 @@ class OvernightSessionFactory(ResourceSessionFactory[OvernightSession]):
             # On the worker's input, never in its environment, which a host agent can read.
             request["operator_key"] = os.environ[self.operator_key_env]
         command = [self.python, "-m", "overnight.adapters.rollout", "--root", str(self.root)]
-        # The worker restarts with its allow list and these names only, so no trainer secret
-        # is in its environment or a host agent's.
         for name in (POLICY_KEY, *self.pass_env):
             command += ["--pass-env", name]
         return OvernightSession(
@@ -526,7 +475,6 @@ class OvernightSessionFactory(ResourceSessionFactory[OvernightSession]):
 
 
 def _case_id(task: Any) -> str:
-    """The case id out of what TRL passes: the dataset row's prompt messages."""
     if isinstance(task, list) and task and isinstance(task[-1], dict):
         return str(task[-1].get("content") or "")
     if isinstance(task, dict):

@@ -63,7 +63,6 @@ from overnight.execution.usage import ProcessUsage
 from overnight.execution.variations import VariationConfig, resolve_variant
 
 type EpisodeId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$")]
-# Tokens are replaced inside JSON strings such as `--config-json`, so no value may need escaping.
 type Plain = Annotated[str, StringConstraints(pattern=r'^[^"\\\s{}]+$')]
 TOKEN = re.compile(r"\{policy\.(base_url|api_key_env|model)\}")
 
@@ -150,7 +149,6 @@ class Rollout(Contract):
 
 def _substitute(value: JsonValue, tokens: dict[str, str]) -> tuple[JsonValue, bool]:
     if isinstance(value, str):
-        # One pass, so a value is never read as another token.
         replaced, count = TOKEN.subn(lambda match: tokens[match.group(1)], value)
         return replaced, count > 0
     if isinstance(value, list):
@@ -165,8 +163,6 @@ def _substitute(value: JsonValue, tokens: dict[str, str]) -> tuple[JsonValue, bo
 
 
 def _agent(request: RolloutRequest) -> JsonObject | None:
-    """The request's agent with the policy endpoint filled in. A policy the agent never names
-    would leave the agent on another model, so it is refused, as is an unfilled token."""
     if request.agent is None:
         if request.policy is not None:
             raise ValueError("a policy endpoint needs an agent that names it")
@@ -186,9 +182,6 @@ LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 def _route(request: RolloutRequest, contained: bool) -> tuple[RolloutRequest, int | None]:
-    """A contained agent cannot reach the host's loopback, where a trainer such as verifiers
-    serves the policy. For that agent only, the policy's one host port is forwarded through the
-    agent's egress proxy, and the agent is given the proxy's address for it instead."""
     policy = request.policy
     if policy is None or not contained:
         return request, None
@@ -214,8 +207,6 @@ def _resolve(request: RolloutRequest) -> ResolvedScenario:
 
 @contextmanager
 def _withheld(request: RolloutRequest) -> Generator[None]:
-    """Keep the operator model's key out of the episode's environment, which host agents
-    inherit; the operator transport has already read it. A key the policy also uses stays."""
     operator = request.operator_model
     if operator is None or not isinstance(operator.provider, CompatibleProvider):
         yield
@@ -233,7 +224,6 @@ def _withheld(request: RolloutRequest) -> Generator[None]:
 
 
 def _scenario(request: RolloutRequest) -> JsonObject:
-    """The case with the request's agent and operator model, as a suite arm applies them."""
     scenario = dict(request.scenario)
     agent = _agent(request)
     if agent is not None:
@@ -265,14 +255,10 @@ def _operator(request: RolloutRequest, resolved: ResolvedScenario) -> OperatorTr
     return ModelTransport(persona.model, resolved.config.seed)
 
 
-# Failures the run records as infrastructure that the agent under training caused: it asked the
-# operator past the run's operator budget. An eval keeps them invalid; a rollout scores them 0.
 AGENT_CAUSED = frozenset({OperatorBudgetExceeded.__name__})
 
 
 def _failure(verdict: JsonObject) -> RolloutFailure | None:
-    """The run's own failure, classified as the suite classifies `agent_failed` and `invalid`,
-    except that exhausting the operator budget is the agent's (`AGENT_CAUSED`)."""
     failure = verdict.get("failure")
     if not isinstance(failure, dict):
         return None
@@ -295,9 +281,6 @@ def _unanswered(calls: list[UnansweredCall]) -> RolloutFailure:
     )
 
 
-# The variables a worker started with `--clean-env` keeps: what a process and Docker need to run.
-# Anything else, such as a trainer's API keys, tokens or cloud credentials, stays out unless
-# named with `--pass-env`.
 WORKER_ENVIRONMENT = frozenset(
     {
         "PATH",
@@ -316,12 +299,10 @@ WORKER_ENVIRONMENT = frozenset(
         "DOCKER_CONFIG",
     }
 )
-# Set in the environment a cleaned worker restarts with, so it restarts once.
 CLEANED = "OVERNIGHT_ROLLOUT_CLEAN_ENV"
 
 
 def worker_environment(environ: Mapping[str, str], passed: Iterable[str] = ()) -> dict[str, str]:
-    """The variables of `environ` that a cleaned worker keeps: `WORKER_ENVIRONMENT` and `passed`."""
     names = WORKER_ENVIRONMENT | set(passed)
     return {name: value for name, value in environ.items() if name in names}
 
@@ -337,9 +318,6 @@ def _clean_environment(passed: Iterable[str]) -> None:
 
 
 class RolloutWorker:
-    """Runs rollouts one at a time under `root`, one fresh directory per episode. The directory
-    is removed after the rollout unless `keep` is set."""
-
     def __init__(self, root: Path, keep: bool = False) -> None:
         self.root = root
         self.keep = keep
@@ -347,7 +325,6 @@ class RolloutWorker:
     def rollout(self, request: RolloutRequest) -> Rollout:
         policy_model = request.policy.model if request.policy is not None else None
         resolved = _resolve(request)
-        # Whether the agent is contained is read from the resolved case, after its overrides.
         container = getattr(resolved.config.agent, "container", None)
         request, policy_port = _route(request, container is not None)
         if policy_port is not None:
@@ -370,8 +347,6 @@ class RolloutWorker:
             captures: list[CaptureFile] = []
             unanswered: list[UnansweredCall] = []
             try:
-                # Only the files the runner assigned: anything else in the agent folder may be
-                # the agent's own writing.
                 for path in result.capture_paths:
                     capture = read_capture(path)
                     unanswered.extend(capture.unanswered)
@@ -382,8 +357,6 @@ class RolloutWorker:
                             )
                         )
                 if unanswered and (failure is None or failure.kind == FailureKind.AGENT):
-                    # The engine, not the policy, ended these calls, whatever the harness did
-                    # next: the episode says nothing about the policy.
                     failure = _unanswered(unanswered)
             except (OSError, ValueError) as error:
                 captures = []
@@ -393,8 +366,6 @@ class RolloutWorker:
                     message=f"unreadable capture file: {error}",
                 )
             if request.capture and not captures and result.usage.calls and failure is None:
-                # A connector that does not pass `run_capture()` to its relay would give a score
-                # with no tokens; the trainer must not mistake that for an episode without calls.
                 failure = RolloutFailure(
                     kind=FailureKind.INFRASTRUCTURE,
                     type="CaptureMissing",
@@ -442,12 +413,11 @@ def main(root: Path, keep: bool, clean_env: bool, pass_env: tuple[str, ...]) -> 
             try:
                 request = RolloutRequest.model_validate_json(line)
             except ValidationError as error:
-                # Without the input, which may hold the operator key.
                 problems = error.errors(include_url=False, include_input=False)
                 raise ValueError(f"invalid rollout request: {problems}") from None
             identifier = request.id
             answer = worker.rollout(request).model_dump_json()
-        except Exception as error:  # one failed episode must not stop the worker
+        except Exception as error:
             answer = json.dumps({"id": identifier, "error": f"{type(error).__name__}: {error}"})
         sys.stdout.write(answer + "\n")
         sys.stdout.flush()

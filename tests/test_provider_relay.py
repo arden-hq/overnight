@@ -37,7 +37,6 @@ MESSAGE = {
     ],
 }
 USAGE = {"prompt_tokens": 4, "completion_tokens": 3, "total_tokens": 7}
-# The upstream SSE an engine sends when it streams; capture off must pass it on unchanged.
 ENGINE_STREAM = (
     b'data: {"id": "gen-1", "object": "chat.completion.chunk", "choices": '
     b'[{"index": 0, "delta": {"content": "hi"}, "finish_reason": null}]}\n\n'
@@ -48,7 +47,6 @@ ENGINE_STREAM = (
 
 
 def engine(received: list[dict], token_ids: bool = True) -> Starlette:
-    """A fake vLLM-style OpenAI-compatible server."""
 
     async def completions(request: Request) -> Response:
         body = json.loads(await request.body())
@@ -88,7 +86,6 @@ def engine(received: list[dict], token_ids: bool = True) -> Starlette:
 
 
 async def relay_calls(capture, requests: list[tuple[str, dict]], token_ids: bool = True):
-    """Serve a fake engine and a relay on loopback; send each (path, body) as the harness."""
     received: list[dict] = []
     records: list[dict] = []
     answers: list[httpx.Response] = []
@@ -108,7 +105,6 @@ async def relay_calls(capture, requests: list[tuple[str, dict]], token_ids: bool
 
 
 def replayed(answer: httpx.Response) -> tuple[list[dict], dict]:
-    """Parse a chat-completions SSE stream the way an OpenAI client accumulates it."""
     events = list(EventSource(answer).iter_sse())
     assert events[-1].data == "[DONE]"
     chunks = [json.loads(event.data) for event in events[:-1]]
@@ -263,7 +259,6 @@ def test_a_call_the_harness_gave_up_on_ends_at_the_engine_and_is_stored_unanswer
         records: list[dict] = []
 
         async def completions(request: Request) -> Response:
-            # The relay's call ends when its own client, the harness, has left.
             await request.body()
             with anyio.move_on_after(10):
                 while (await request.receive())["type"] != "http.disconnect":

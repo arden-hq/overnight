@@ -1,5 +1,3 @@
-"""Training cases from a generated scenario family, after Overnight's split check passes."""
-
 import json
 import subprocess
 from dataclasses import dataclass
@@ -9,8 +7,6 @@ from typing import Any
 
 @dataclass(frozen=True)
 class Case:
-    """One generated case. The scenario holds its checks; it never reaches the agent from here."""
-
     id: str
     family: str
     seed: int
@@ -23,7 +19,6 @@ def has_persona(scenario: dict[str, Any]) -> bool:
 
 
 def check_split(python: str, family: Path, held_out: list[Path]) -> None:
-    """Overnight's own split check; a family that overlaps the held-out cases loads nothing."""
     if not python:
         raise ValueError("set OVERNIGHT_PYTHON or `python` to Overnight's interpreter")
     command = [python, "-m", "overnight.families.split", str(family)]

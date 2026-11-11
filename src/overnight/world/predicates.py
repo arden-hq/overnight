@@ -67,8 +67,6 @@ def resolve_references(
     results: Mapping[str, Result],
     owners: Mapping[str, tuple[str, str | None]],
 ) -> JsonValue:
-    """Replace `$ref` objects with earlier result values. Outside trusted events, a reference
-    may read only results of the same actor and chat."""
     if isinstance(value, (list, tuple)):
         return [resolve_references(item, owner, trusted_event, results, owners) for item in value]
     if not isinstance(value, Mapping):

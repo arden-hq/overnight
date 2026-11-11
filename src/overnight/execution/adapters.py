@@ -227,14 +227,6 @@ class PersistentCommandAdapter(ManagedAdapter):
         capture: bool = False,
         policy_port: int | None = None,
     ) -> None:
-        """With `capture`, each process is told where to store the model calls it captures, and
-        `capture_paths` lists the host files the runner assigned, in start order: `capture_path`
-        of each provenance sidecar. A contained process writes to its own mount outside the agent
-        folder, copied to that path when the container ends. Capture needs a provenance path.
-        `policy_port` (training only) lets a contained process reach that one host port through
-        its egress proxy (`policy_url`). With a provenance path, each process also gets a fresh
-        folder of its own (`AGENT_DIRECTORY_VARIABLE`): the sidecar's path without its suffix on
-        the host, the mounted agent folder in a container."""
         if capture and provenance_path is None:
             raise ValueError("capture needs a provenance path")
         if policy_port is not None and container is None:
@@ -314,7 +306,6 @@ class PersistentCommandAdapter(ManagedAdapter):
         self._egress_log = None
         capture = None
         if self.capture and self._kept is not None:
-            # Not in the agent folder, which the agent's tools work in and which is kept whole.
             self._capture_folder = Path(mkdtemp(prefix="overnight-capture-"))
             own_folder(self._capture_folder)
             self.capture_paths.append(capture_path(self._kept.with_suffix(".json")))
@@ -342,7 +333,6 @@ class PersistentCommandAdapter(ManagedAdapter):
 
     async def _start_process(self) -> None:
         environment = os.environ.copy()
-        # Capture comes only from this run's own setting, never from the caller's environment.
         for key in (
             "OVERNIGHT_CHAT_ID",
             "OVERNIGHT_CHAT_NAMESPACE",
@@ -369,8 +359,6 @@ class PersistentCommandAdapter(ManagedAdapter):
             capture = None
             directory = None
             if path is not None:
-                # The process's own folder beside its sidecars, named as a contained process's
-                # folder is kept: fresh for each process, so no two episodes share it.
                 folder = path.with_suffix("")
                 try:
                     folder.mkdir(mode=0o700)
@@ -692,8 +680,6 @@ class PersistentCommandAdapter(ManagedAdapter):
 
 
 def _keep_capture(source: Path, target: Path) -> None:
-    """Copy a container's capture file to the host path the runner assigned. Only a regular file
-    is copied: a link there could name a host file once read outside the container."""
     try:
         descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
@@ -714,9 +700,6 @@ def make_adapter(
     capture: bool = False,
     policy_port: int | None = None,
 ) -> ManagedAdapter:
-    """`capture` asks a persistent process agent to store its model calls for training, and
-    `policy_port` lets a contained one reach the trainer's policy port (see
-    `PersistentCommandAdapter`); a scripted agent makes no calls."""
     match config:
         case HarnessAgent():
             from overnight.execution.harness import HarnessAdapter

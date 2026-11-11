@@ -1,5 +1,3 @@
-"""A generated scenario family as a tinker-cookbook RL dataset."""
-
 import json
 import os
 from collections.abc import Sequence
@@ -13,8 +11,6 @@ from overnight_tinker.env import EpisodeConfig, OvernightEnvGroupBuilder, operat
 
 
 class OvernightDataset(RLDataset):
-    """Batches of `groups_per_batch` cases, one group of `group_size` episodes per case."""
-
     def __init__(
         self, config: EpisodeConfig, cases: list[Case], group_size: int, groups_per_batch: int
     ) -> None:
@@ -74,7 +70,7 @@ class OvernightDatasetBuilder(RLDatasetBuilder):
             rollout_timeout_seconds=self.rollout_timeout_seconds,
             sampling_turn_timeout_seconds=self.sampling_turn_timeout_seconds,
         )
-        operator_key(config)  # fail at load, not in the first persona episode
+        operator_key(config)
         return config
 
     async def __call__(self) -> tuple[RLDataset, RLDataset | None]:

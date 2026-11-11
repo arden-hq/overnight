@@ -26,7 +26,6 @@ def at_path(
 
 
 def instant(text: str) -> datetime | None:
-    """The moment an ISO 8601 time with a UTC offset names, or None for any other text."""
     if not text[:1].isdigit():
         return None
     try:
@@ -37,7 +36,6 @@ def instant(text: str) -> datetime | None:
 
 
 def text_equal(left: str, right: str) -> bool:
-    """Two spellings of one moment, such as `11:00+04:00` and `07:00Z`, are one value."""
     if left == right:
         return True
     moment = instant(left)

@@ -18,8 +18,6 @@ from overnight.execution.scenario import load_json
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# A process agent that owns a capturing provider relay, as a connector does: it takes the policy
-# endpoint from its command, sends one chat completion through the relay and reports the answer.
 RELAY_AGENT = """import json, os, pathlib, sys
 import anyio, httpx
 from overnight.adapters.http import serve_http
@@ -62,7 +60,6 @@ for count, line in enumerate(sys.stdin):
 
 
 def operator_endpoint(models: list[str]) -> Starlette:
-    """A local OpenAI-compatible model that plays the operator: it answers nothing."""
 
     async def completions(request: Request) -> JSONResponse:
         models.append(json.loads(await request.body())["model"])
@@ -135,7 +132,6 @@ def test_each_rollout_returns_only_its_own_captured_calls(tmp_path, monkeypatch)
                 for name in ("first", "second")
             ]
 
-    # Each episode made one engine call; each rollout holds that call and no other.
     assert len(received) == 2 and all(body["return_token_ids"] for body in received)
     for number, rollout in enumerate(rollouts, start=1):
         assert rollout.score is not None
@@ -144,7 +140,6 @@ def test_each_rollout_returns_only_its_own_captured_calls(tmp_path, monkeypatch)
         assert call.generation_id == f"gen-{number}"
         assert call.prompt_token_ids == [1, 2, 3, 4] and call.completion_token_ids == [7, 8, 9]
         assert (tmp_path / "rollouts" / rollout.id / "agent" / capture.source).is_file()
-        # The persona ran on the configured local model, and provenance says so.
         operator = rollout.provenance["operator"]
         assert operator["configured_model"] == "local/operator"
         assert operator["model"] == "local/operator-served"
@@ -152,7 +147,6 @@ def test_each_rollout_returns_only_its_own_captured_calls(tmp_path, monkeypatch)
     assert operator_models and set(operator_models) == {"local/operator"}
 
 
-# A process agent that tampers with captures instead of calling a model, or breaks protocol.
 TAMPERING_AGENT = """import json, os, pathlib, sys
 
 mode = sys.argv[1]
@@ -201,8 +195,6 @@ def test_rollouts_ignore_planted_captures_and_tell_agent_from_infrastructure_fai
     assert crashed.failure is not None and crashed.failure.kind == "agent"
 
 
-# A process agent that reports which of the names in its command it can read: in its own
-# environment, or in the environment any ancestor process started with (`ps eww`).
 PEEKING_AGENT = """import json, os, subprocess, sys
 report, names = sys.argv[1], sys.argv[2:]
 pids, pid = [], os.getppid()
@@ -249,7 +241,6 @@ def test_a_clean_worker_keeps_trainer_secrets_from_its_agents_and_their_ancestor
     assert json.loads(report.read_text()) == {"TRAINER_SECRET": False, "EPISODE_KEY": True}
 
 
-# An ACP connector factory that registers and then cannot launch its native process.
 UNLAUNCHABLE_FACTORY = """from overnight.adapters.config import Factory
 from overnight.execution.harness import Capabilities
 
@@ -280,7 +271,6 @@ def test_one_host_agent_document_keeps_each_episodes_evidence_in_that_episode(
     scenario = load_json(ROOT / "examples/catering-chaos.json")
     for name in ("first", "second"):
         worker.rollout(RolloutRequest(id=name, scenario=scenario, agent=agent))
-        # The relative evidence path is inside this episode's agent folder, not a shared one.
         native = tmp_path / "rollouts" / name / "agent" / "connector-generation-0" / "native"
         assert (native / "native.jsonl").is_file()
     assert not (tmp_path / "native").exists()
@@ -310,13 +300,10 @@ def test_a_harness_that_ends_before_it_is_ready_is_infrastructure(tmp_path):
         assert rollout.verdict == "invalid" and rollout.failure is not None
         return rollout.failure.kind
 
-    # Exiting before `ready` is a connector that could not start; once ready, it is the agent's.
     assert failure("start") == "infrastructure"
     assert failure("turn") == "agent"
 
 
-# A process agent that asks the policy once through a capturing relay and, whatever the relay
-# answers, ends its turn instead of exiting, as a harness that reports a provider error does.
 TURN_ENDING_AGENT = RELAY_AGENT.replace("            answer.raise_for_status()\n", "").replace(
     '"content": "go"', '"content": sys.argv[4]'
 )
@@ -329,7 +316,6 @@ def test_a_policy_call_the_engine_did_not_answer_drops_the_episode(tmp_path, mon
     worker = RolloutWorker(tmp_path / "rollouts")
     scenario = load_json(ROOT / "examples/catering-chaos.json")
     with start_blocking_portal() as portal:
-        # An engine without token ids (`capture_missing`), and an engine error.
         for token_ids, said in ((False, "go"), (True, "overloaded")):
             with portal.wrap_async_context_manager(serve_http(engine([], token_ids))) as url:
                 command = [sys.executable, str(agent), "{policy.base_url}"]

@@ -1,10 +1,3 @@
-"""Scenario families: code that samples a hidden true record and emits a whole case from it.
-
-A case is a scenario with its checks and a scripted oracle, the operator answers that let
-`overnight qa` prove the oracle without a model, and wrong agents that the checks must reject.
-Code writes every check; none comes from a model.
-"""
-
 from collections.abc import Callable
 from typing import NamedTuple
 
@@ -36,9 +29,6 @@ class Case(BaseModel):
 
 
 class WrongAgent(NamedTuple):
-    """A scripted agent that must not pass, the check group that must reject it and the
-    operator that answers it."""
-
     name: str
     actions: list[JsonValue]
     rejected_by: str
@@ -75,7 +65,6 @@ def _order_resolution(case_id: str, seed: int) -> Built:
 
 FAMILIES: dict[str, Build] = {order_resolution.FAMILY: _order_resolution}
 SEEDS = range(10_000)
-"""Seeds a case id can name; each id spells its seed in four digits."""
 
 
 def _answers(result: RunResult) -> list[JsonObject]:
@@ -90,8 +79,6 @@ def _rejected(verdict: JsonObject, group: str) -> bool:
 
 
 def generate(family: str, seed: int) -> Case:
-    """Build one case and record the operator answers of its runs. The oracle must pass, and
-    each wrong agent must be rejected by the check group it targets."""
     if seed not in SEEDS:
         raise FamilyError(f"seed {seed} is outside {SEEDS.start} to {SEEDS.stop - 1}")
     case_id = f"{family}-{seed:04d}"

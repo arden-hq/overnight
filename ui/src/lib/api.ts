@@ -40,7 +40,6 @@ export async function send<T>(method: string, path: string, payload?: unknown, h
   try {
     body = text ? JSON.parse(text) : null;
   } catch {
-    // The dev proxy answers with plain text when the API process is down.
     throw new ApiFailure(response.status, { code: response.ok ? "invalid_json" : "unreachable", message: text.slice(0, 200) || response.statusText });
   }
   if (!response.ok) throw new ApiFailure(response.status, asApiError(body, response.statusText));
@@ -237,7 +236,6 @@ export function useSnapshots(runId: string): { snapshots?: Snapshot[]; error?: s
           const snapshot = isRecord(row) ? fromRow(index + 1, row) : undefined;
           if (snapshot) out.push(snapshot);
         } catch {
-          /* a malformed line is reported by the run's issues */
         }
       });
       return out;

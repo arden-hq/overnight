@@ -83,14 +83,6 @@ const runtimeFiles = (repo) => {
 const overnightVersion = () =>
   readFileSync(join(overnightRepo, "pyproject.toml"), "utf8").match(/^version = "([^"]+)"/m)?.[1] ?? null
 
-/**
- * Identity of what was launched. The sha256 values cover the connector's own
- * non-test .mjs files (code) and, for the Arden runtime, the server and
- * libs/* dist bundles, the MCP SDK dist/esm build, and the manifests and
- * lockfile named in runtimeFiles. They do not cover the rest of
- * apps/server-ts/node_modules, Arden source outside dist, or the Python tool
- * sidecar. git_commit is HEAD, suffixed "-dirty" when the work tree differs.
- */
 export const ardenProvenance = (config) => ({
   implementation: "arden",
   code: {

@@ -155,8 +155,6 @@ class Episode(Trial):
     def deliver_operator_message(
         self, step: OperatorMessage, message_id: str, request_id: str | None = None
     ) -> None:
-        """A message for a task that has not started is in its chat's transcript at once, and
-        becomes a notification when the task starts, unless the task resets the chat's memory."""
         state = next((state for state in self.tasks if state.config.id == step.task_id), None)
         if state is None or state.status != "pending":
             super().deliver_operator_message(step, message_id, request_id)

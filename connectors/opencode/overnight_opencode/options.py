@@ -33,5 +33,4 @@ class OpenCodeOptions(RequestBudget):
 
     @property
     def upstream_model(self) -> str:
-        """The model ID OpenCode sends to the provider, after its provider selector."""
         return self.model.split("/", 1)[1]

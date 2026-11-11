@@ -59,13 +59,8 @@ PATCHED_FILES = [
 ]
 
 
-# OpenRouter has its own OpenCode package. A configured endpoint uses the Responses route: it
-# honors OpenCode's `strict: false`, so optional tool fields stay optional, where Chat Completions
-# or Anthropic Messages routes may reject tool calls or make every tool field required.
 OPENROUTER_PACKAGE = "@opencode/ai/providers/openrouter"
 COMPATIBLE_PACKAGE = "@opencode/ai/providers/openai-compatible-responses"
-# OpenCode reaches the provider only through the connector's loopback relay, which holds the key
-# and bounds paid requests. OpenCode gets the relay's per-run token in this variable.
 RELAY_KEY_ENV = "OVERNIGHT_OPENCODE_PROXY_KEY"
 
 

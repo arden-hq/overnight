@@ -6,8 +6,6 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 export default async function (pi) {
   const config = JSON.parse(await readFile(process.env.OVERNIGHT_PI_TOOLS, "utf8"));
   const clients = [];
-  // The connector's relay bounds every pi process of this run and refuses a request past its
-  // limits with an HTTP error; the process stops on any provider error rather than retrying.
   pi.on("after_provider_response", (event) => {
     if (event.status >= 400) {
       process.stderr.write(`Overnight provider response: HTTP ${event.status}\n`);

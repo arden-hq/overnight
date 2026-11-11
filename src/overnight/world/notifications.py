@@ -33,12 +33,6 @@ class Settled:
 
 
 class NotificationLog:
-    """Notifications in post order, routed to (actor, chat) inboxes and delivered once per inbox.
-
-    An inbox (actor, chat) receives the actor's notifications whose chat_id is None or that chat;
-    (actor, None) receives all of them. Opening an inbox sets its floor to the current log length.
-    """
-
     def __init__(self, actors: Mapping[str, Actor], can_see: Callable[[Actor, str], bool]) -> None:
         self._actors = actors
         self._can_see = can_see
@@ -63,15 +57,6 @@ class NotificationLog:
         chats: Mapping[str, str] | None = None,
         invoker_chat: str | None = None,
     ) -> list[Posted]:
-        """Append the notifications for each eligible recipient and return the new ones.
-
-        ``chats`` routes a recipient's notification to the chat that last wrote in its thread;
-        other recipients get ``chat_id``. The call never notifies the chat that made it: the
-        invoker is notified only when the call came from ``invoker_chat``, in the thread's chat
-        if another chat last wrote it, else in each of its other open chats (one id per chat).
-
-        Actors without the agent role and actors who cannot see the service are dropped.
-        Posting the same cause and recipient again is a no-op."""
         posted: list[Posted] = []
         for recipient in dict.fromkeys(recipients):
             actor = self._actors.get(recipient)
@@ -118,7 +103,6 @@ class NotificationLog:
         return posted
 
     def _other_chats(self, actor_id: str, invoker_chat: str, thread_chat: str | None) -> list[str]:
-        """The invoker's chats other than ``invoker_chat`` that its own call concerns."""
         if thread_chat is not None:
             return [] if thread_chat == invoker_chat else [thread_chat]
         return [
@@ -133,7 +117,6 @@ class NotificationLog:
         self._delivered.setdefault(inbox, set())
 
     def resolve(self, actor_id: str, chat_id: str | None) -> Inbox:
-        """The open inbox for a call made in ``chat_id``: that chat's, else the actor's whole one."""
         for inbox in ((actor_id, chat_id), (actor_id, None)):
             if inbox in self._floors:
                 return inbox
@@ -154,7 +137,6 @@ class NotificationLog:
         ]
 
     def deliver(self, actor_id: str, chat_id: str | None, ids: Iterable[str]) -> list[str]:
-        """Mark ids delivered to the inbox; return the ones that were not delivered before."""
         inbox = (actor_id, chat_id)
         offered = {notification.id for notification in self.undelivered(actor_id, chat_id)}
         delivered = self._delivered.setdefault(inbox, set())
@@ -174,8 +156,6 @@ class NotificationLog:
         self._waits[wait.invocation.id] = (wait, inbox)
 
     def settle(self, now: int) -> list[Settled]:
-        """Resolve pending waits in creation order: with every undelivered notification of their
-        inbox, or empty once their timeout has come. Delivered notifications are marked here."""
         settled: list[Settled] = []
         for invocation_id, (wait, inbox) in list(self._waits.items()):
             notifications = tuple(self.undelivered(*inbox))
@@ -187,7 +167,6 @@ class NotificationLog:
         return settled
 
     def expire(self, actor_id: str, chat_id: str | None) -> list[Settled]:
-        """Time out the inbox's pending waits now, as at a task deadline."""
         settled: list[Settled] = []
         for invocation_id, (wait, inbox) in list(self._waits.items()):
             if inbox == (actor_id, chat_id):

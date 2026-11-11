@@ -19,7 +19,6 @@ from yarl import URL
 
 # verifiers' own request limit (`MAX_REQUEST_BODY`); aiohttp's default is 1 MiB.
 MAX_REQUEST_BODY = 1024**3
-# Per-hop headers, and the framing each side sets for itself.
 SKIPPED_HEADERS = frozenset(
     {
         "connection",
@@ -38,12 +37,6 @@ SKIPPED_HEADERS = frozenset(
 
 
 class PolicyForwarder:
-    """Forwards every request to its rollout's interception endpoint, which checks the secret.
-
-    `open` counts the policy calls (POSTs) still being served, `abandoned` those whose harness
-    left before the whole answer was written. Either one means a call the engine had when the
-    harness stopped waiting."""
-
     def __init__(self, endpoint: str) -> None:
         self._endpoint = URL(endpoint)
         self._client: aiohttp.ClientSession | None = None
@@ -56,18 +49,15 @@ class PolicyForwarder:
 
     @contextlib.asynccontextmanager
     async def serving(self) -> AsyncIterator[str]:
-        """Serve on a free loopback port and yield the endpoint the harness uses instead."""
         app = web.Application(client_max_size=MAX_REQUEST_BODY)
         app.router.add_route("*", "/{path:.*}", self._forward)
-        # A handler is cancelled when its client disconnects, so a call the harness gave up on
-        # ends here while verifiers keeps its turn.
+        # aiohttp cancels a handler when its client disconnects only with handler_cancellation.
         runner = web.AppRunner(app, access_log=None, handler_cancellation=True, shutdown_timeout=1)
         await runner.setup()
         sock = socket.socket()
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
         try:
-            # verifiers' client bounds nothing here; the harness's own client times out.
             async with aiohttp.ClientSession(
                 auto_decompress=False, timeout=aiohttp.ClientTimeout(total=None)
             ) as client:

@@ -1,16 +1,3 @@
-"""One Overnight episode as a tinker-cookbook `Env`, driven by an unmodified agent harness.
-
-The cookbook's rollout loop owns sampling: it asks the env for an observation, samples an action
-with the step's policy, and hands the action back. Here the harness asks the questions. Each
-episode starts its own chat proxy (tinker-cookbook's capture proxy app, `make_app`) on the
-host's loopback with its own secret, and one Overnight rollout worker whose agent names that
-proxy as its policy endpoint. The proxy renders each chat request to tokens with the trainer's
-renderer and calls its sampling client; that client is a bridge that turns the request into the
-env's next observation and waits for the cookbook's action. So every policy call becomes one
-`Transition` sampled by the trainer's own policy, with its tokens and logprobs, and the episode's
-reward is Overnight's score on the last one.
-"""
-
 import asyncio
 import contextlib
 import json
@@ -55,8 +42,6 @@ class OvernightError(Exception):
 
 @dataclass(frozen=True)
 class EpisodeConfig:
-    """Everything an episode needs, as plain picklable values."""
-
     python: str
     """Overnight's interpreter."""
     model_name: str
@@ -124,8 +109,6 @@ class _Pending:
 
 @dataclass
 class _Bridge:
-    """The proxy's sampling client. Each call waits until the env's action answers it."""
-
     requests: asyncio.Queue[_Pending] = field(default_factory=asyncio.Queue)
 
     async def sample(
@@ -155,8 +138,6 @@ def episode_request(
 
 
 def reward(result: dict[str, Any]) -> tuple[float, dict[str, float]]:
-    """The episode's reward from the worker's result: the score of a graded run, 0 when the agent
-    under training failed. Anything else raises, and the episode is dropped."""
     if "error" in result:
         raise OvernightError(f"Overnight refused the episode: {result['error']}")
     failure = result["failure"]
@@ -171,8 +152,6 @@ def reward(result: dict[str, Any]) -> tuple[float, dict[str, float]]:
 
 
 class OvernightEnv(Env):
-    """One Overnight episode. Single use, as every cookbook env."""
-
     def __init__(self, config: EpisodeConfig, case: Case) -> None:
         self.config = config
         self.case = case
@@ -201,8 +180,6 @@ class OvernightEnv(Env):
             await self._start()
             pending = await self._next()
             if pending is None:
-                # The episode ended without a policy call (a scripted agent, or a harness that
-                # failed or ran out of time first): no tokens, but its reward counts in the group.
                 score, metrics = self._final()
                 return InitialObservationOverflow(score, metrics)
             return pending.prompt, pending.stop
@@ -214,7 +191,6 @@ class OvernightEnv(Env):
         try:
             assert self._current is not None
             if self._current.answer.done():
-                # The harness gave up on the call while the sampler worked on it.
                 raise OvernightError("the harness gave up on a policy call before it was sampled")
             if self._past_deadline():
                 raise OvernightError("the episode's deadline passed while the sampler worked")
@@ -234,10 +210,7 @@ class OvernightEnv(Env):
         secret = token_hex(16)
         deps = ProxyDeps(renderer=renderer, sampling_client=self._bridge, model_label="policy")
         app = make_app(deps, auth_token=secret)
-        # First, so it also sees the proxy's own authentication refusals.
         app.middlewares.insert(0, self._watch)
-        # A harness that disconnects cancels its call's handler, so a call it gave up on is
-        # recorded (`_watch`) and never answered with a sampled action.
         self._runner = web.AppRunner(app, handler_cancellation=True)
         await self._runner.setup()
         await web.TCPSite(self._runner, "127.0.0.1", 0).start()
@@ -248,7 +221,6 @@ class OvernightEnv(Env):
         if self.config.rollout_timeout_seconds is not None:
             loop = asyncio.get_running_loop()
             self._deadline = loop.time() + self.config.rollout_timeout_seconds
-        # The worker restarts with its allow list and these names only (`--clean-env`).
         environ = os.environ | {POLICY_KEY: secret}
         self._worker = asyncio.create_task(self._run_worker(json.dumps(request), environ))
 
@@ -257,8 +229,6 @@ class OvernightEnv(Env):
 
     @web.middleware
     async def _watch(self, request: web.Request, handler: Any) -> web.StreamResponse:
-        """Record every request the proxy did not serve, including one the harness gave up on
-        before the sampler answered: that call's handler is cancelled."""
         try:
             response = await handler(request)
         except (Exception, asyncio.CancelledError) as error:
@@ -270,8 +240,6 @@ class OvernightEnv(Env):
         return response
 
     async def _next(self) -> _Pending | None:
-        """The harness's next policy call, or None once the episode has ended: its worker
-        returned, or the deadline passed while the agent, not the sampler, had the turn."""
         assert self._worker is not None
         getter = asyncio.ensure_future(self._bridge.requests.get())
         remaining = None
@@ -282,7 +250,6 @@ class OvernightEnv(Env):
                 {getter, self._worker}, timeout=remaining, return_when=asyncio.FIRST_COMPLETED
             )
         finally:
-            # A cancelled wait must not leave a call taken that `close` cannot answer.
             if not getter.done():
                 getter.cancel()
             elif not getter.cancelled():
@@ -292,7 +259,6 @@ class OvernightEnv(Env):
             return None
         if getter.done() and not getter.cancelled():
             return self._current
-        # Out of time with every policy call answered: the agent was slow or looping.
         self._timed_out = True
         self.close_soon()
         return None
@@ -336,8 +302,6 @@ class OvernightEnv(Env):
         return json.loads(lines[-1])
 
     def close_soon(self) -> None:
-        """Start stopping the episode without waiting, for a rollout that failed or was
-        cancelled; `close` waits for it."""
         if self._closing is None:
             self._closing = asyncio.ensure_future(self._close())
 
@@ -347,7 +311,6 @@ class OvernightEnv(Env):
         await asyncio.shield(self._closing)
 
     async def _close(self) -> None:
-        # The worker first: its runner removes the harness, which stops new calls.
         if self._process is not None:
             await _stop(self._process)
         if self._worker is not None and not self._worker.done():
@@ -364,8 +327,6 @@ class OvernightEnv(Env):
 
 
 async def _stop(process: asyncio.subprocess.Process) -> None:
-    """Interrupt the worker so its runner removes the episode's processes and containers, then
-    kill what is left of its process group."""
     if process.returncode is not None:
         return
     with contextlib.suppress(ProcessLookupError):
@@ -379,9 +340,6 @@ async def _stop(process: asyncio.subprocess.Process) -> None:
 
 
 class OvernightEnvGroupBuilder(EnvGroupBuilder):
-    """`group_size` episodes of one case. Each env has its own proxy, secret, worker and episode
-    folder, so episodes in flight never share calls. Holds plain values only, so it pickles."""
-
     def __init__(self, config: EpisodeConfig, case: Case, group_size: int) -> None:
         self.config = config
         self.case = case

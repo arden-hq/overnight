@@ -15,7 +15,6 @@ CONTAINER_EVIDENCE = "/overnight/agent/native"
 
 
 def provider_options[F: Callable](command: F) -> F:
-    """The model provider: OpenRouter, or an OpenAI-compatible endpoint given at run time."""
     for option in reversed(
         [
             click.option(

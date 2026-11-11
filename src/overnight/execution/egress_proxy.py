@@ -6,8 +6,6 @@ import socket
 import sys
 
 READY = "egress proxy ready"
-# Training only: the proxy's own port that passes a connection, unread, to one port of the host
-# (`--policy-port`), where the trainer serves the policy under training on loopback.
 POLICY_LISTEN_PORT = 3129
 POLICY_HOST = "host.docker.internal"
 HEADER_LIMIT = 16 * 1024
@@ -114,8 +112,6 @@ async def _forward(
 
 
 async def serve(port: int, hosts: frozenset[str], policy: tuple[str, int] | None = None) -> None:
-    """Serve CONNECT to the allowed hosts on `port`. With `policy`, also pass every connection to
-    `POLICY_LISTEN_PORT` through to that one host and port, and nowhere else."""
     server = await asyncio.start_server(
         lambda reader, writer: _serve(hosts, reader, writer),
         host="0.0.0.0",

@@ -46,7 +46,6 @@ const listeners = new Set<() => void>();
 try {
   recent = JSON.parse(localStorage.getItem("overnight-recent-scenarios") ?? "[]");
 } catch {
-  /* storage blocked */
 }
 
 export function visit(id: string) {
@@ -55,7 +54,6 @@ export function visit(id: string) {
   try {
     localStorage.setItem("overnight-recent-scenarios", JSON.stringify(recent));
   } catch {
-    /* storage blocked */
   }
   listeners.forEach((l) => l());
 }

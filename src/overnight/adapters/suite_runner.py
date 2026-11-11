@@ -152,7 +152,6 @@ def attempt_score(run_dir: Path) -> float | None:
     try:
         tasks = TypeAdapter(list[JsonObject]).validate_json(path.read_bytes())
     except OSError, ValueError:
-        # Unreadable task grades leave the attempt without a score, never a guessed one.
         return None
     return score(verdict, tasks)
 

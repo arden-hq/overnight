@@ -118,8 +118,6 @@ class HarnessAdapter(PersistentCommandAdapter):
                     }
                 )
             except AgentBehaviorError as error:
-                # Nothing the agent under evaluation decides runs before `ready`: a harness that
-                # ends or stalls here is a connector that could not start, not the agent's fault.
                 raise AdapterError(f"harness ended before it was ready: {error}") from error
             try:
                 ready = Ready.model_validate(reply)
@@ -274,8 +272,6 @@ def harness_busy(adapter) -> bool:
 
 
 def delivered_ids(adapter, observation: JsonObject, action: Action) -> list[str]:
-    """The notification ids one exchange delivered: the whole observation for a non-harness
-    adapter or a harness that finished; otherwise the ids the harness put in a native prompt."""
     offered = [
         notification.id
         for notification in notifications_contract.validate_python(observation["notifications"])

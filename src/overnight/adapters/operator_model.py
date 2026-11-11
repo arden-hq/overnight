@@ -1,8 +1,3 @@
-"""The persona operator's model transport: the only operator code that reaches the network.
-
-It sends an OpenAI-compatible chat completion to the configured provider. The API key is read
-from the provider's environment variable and is never logged, recorded or put in an error."""
-
 import json
 import os
 import urllib.error
@@ -39,10 +34,6 @@ _opener = urllib.request.build_opener(_RefuseRedirects)
 
 
 class ModelTransport:
-    """Asks the configured model once per call, deterministically where the provider allows:
-    temperature 0 and the scenario seed. The provider is the shared provider option the arms
-    use; its `reasoning_effort`, when set, is sent on every call."""
-
     source: Literal["model"] = "model"
 
     def __init__(
@@ -104,8 +95,6 @@ class ModelTransport:
         )
 
     def _usage(self, usage: object) -> ProcessUsage:
-        """Tokens as reported; cost from the configured rates, so it is a budget bound. A
-        response without token counts cannot be bounded, so it ends the call unanswered."""
         counts = (
             readable(
                 input_tokens=usage.get("prompt_tokens"),
@@ -128,7 +117,6 @@ class ModelTransport:
         )
 
     def _provider_error(self, error: urllib.error.HTTPError) -> str:
-        """The provider's own error text, shortened, with the key removed if it was echoed."""
         try:
             detail = json.loads(error.read(65_536))
             message = detail.get("error", {}).get("message") if isinstance(detail, dict) else None

@@ -62,8 +62,6 @@ def _owned(row: Reminder, actor_id: str) -> bool:
 
 
 class System(Service[SystemState]):
-    """The world's own clock, wait and reminders, available to every agent actor."""
-
     def __init__(self, horizon: int) -> None:
         self.horizon = horizon
         super().__init__(

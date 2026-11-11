@@ -68,8 +68,6 @@ class SuitePlan:
 
 
 def _operator_scenario(scenario: JsonObject, model: OperatorModel | None) -> JsonObject:
-    """Run every persona operator on the suite's operator model, so arms and operator share one
-    provider."""
     operator = scenario.get("operator")
     persona = operator.get("persona") if isinstance(operator, dict) else None
     if model is None or not isinstance(operator, dict) or not isinstance(persona, dict):

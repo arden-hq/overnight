@@ -1,10 +1,3 @@
-"""Two seats over one Overnight episode: the trained agent and a frozen operator.
-
-Overnight's runner owns every turn. verifiers supplies one intercepted model session per seat, as
-prime-envs' `tau_common` does for Tau: the `agent` session is the policy under training, and the
-`operator` session answers as a persona case's operator and is never trained.
-"""
-
 import verifiers.v1 as vf
 
 from overnight_verifiers.harness import EPISODE_SESSIONS, OvernightHarness
@@ -39,7 +32,6 @@ class OvernightEnv(vf.Env[OvernightEnvConfig]):
             if not isinstance(agent.harness, OvernightHarness):
                 raise TypeError(f"the {role} seat needs Overnight's harness")
             if not isinstance(agent.runtime_config, vf.SubprocessConfig):
-                # Overnight's runner owns isolation: it puts the agent in a container itself.
                 raise TypeError(f"the {role} seat runs Overnight as a host subprocess")
         agents.operator.trainable = False
 
@@ -47,7 +39,6 @@ class OvernightEnv(vf.Env[OvernightEnvConfig]):
         token = EPISODE_SESSIONS.set({})
         try:
             if has_persona(task.data.scenario):
-                # The operator's session stays open for the whole episode; Overnight calls it.
                 async with agents.operator.interaction(vf.Task(vf.TaskData())):
                     await agents.agent.run(task)
             else:

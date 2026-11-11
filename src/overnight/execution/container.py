@@ -12,7 +12,6 @@ from overnight.domain.contracts import AgentContainer
 from overnight.execution.egress_proxy import POLICY_LISTEN_PORT, READY
 
 AGENT_DIRECTORY = "/overnight/agent"
-# A capturing process's own folder, outside the agent folder and its working directory.
 CAPTURE_DIRECTORY = "/overnight/capture"
 # docker run's own exit code when it cannot create or start the container.
 DOCKER_FAILED = 125
@@ -169,13 +168,11 @@ def egress_names(name: str) -> tuple[str, str]:
 
 
 def policy_url(path: str) -> str:
-    """Where a contained agent reaches the forwarded policy port (see `start_egress`)."""
     return f"http://{EGRESS_ALIAS}:{POLICY_LISTEN_PORT}{path}"
 
 
 def egress_variables(policy: bool = False) -> dict[str, str]:
     proxy = f"http://{EGRESS_ALIAS}:{EGRESS_PORT}"
-    # The forwarded policy port is reached directly, not through the CONNECT proxy.
     direct = "localhost,127.0.0.1,::1" + (f",{EGRESS_ALIAS}" if policy else "")
     return {
         "HTTPS_PROXY": proxy,
@@ -194,8 +191,6 @@ def network_environment() -> dict[str, str]:
 
 
 async def start_egress(name: str, spec: AgentContainer, policy_port: int | None = None) -> str:
-    """Start the agent's internal network and its one exit. `policy_port` (training only) also
-    opens the proxy's policy port, which passes connections to that one port of the host."""
     network, proxy = egress_names(name)
     await _docker("network", "create", "--internal", *_labels(), network)
     allow = [part for host in spec.allow_hosts for part in ("--allow", host)]

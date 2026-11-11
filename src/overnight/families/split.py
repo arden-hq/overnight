@@ -1,17 +1,3 @@
-"""Check that generated family cases and the hand-written held-out cases do not overlap.
-
-Generated families train; the hand-written scenarios and suites stay held out for eval. This
-fails when a family id or a generated case id names a held-out scenario, suite, suite case or
-variation, when a held-out id is named like a case of the family, or when a generated scenario
-is a held-out scenario under another name (same document apart from its id, seed and agent).
-It also fails when either side has nothing to compare: no held-out scenario, or a family with no
-cases. It catches shared ids and exact copies only; a near copy (any other field changed) passes.
-
-    .venv/bin/python -m overnight.families.split .local/families/order-resolution
-
-`scripts/check_split.py` runs the same command.
-"""
-
 import hashlib
 import json
 import sys
@@ -22,7 +8,6 @@ import click
 
 import overnight
 
-# The repository checkout that holds the hand-written scenarios.
 ROOT = Path(overnight.__file__).resolve().parents[2]
 IGNORED_KEYS = frozenset({"id", "seed", "agent"})
 
@@ -44,8 +29,6 @@ def _fingerprint(scenario: dict) -> str:
 
 
 def held_out(roots: list[Path]) -> tuple[dict[str, Path], dict[str, Path]]:
-    """Every id a held-out file names, and the fingerprint of every held-out scenario, including
-    scenarios a suite names outside the roots."""
     ids: dict[str, Path] = {}
     prints: dict[str, Path] = {}
     files = [path for root in roots for path in sorted(root.rglob("*.json"))]

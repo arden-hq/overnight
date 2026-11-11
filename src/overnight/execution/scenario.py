@@ -181,7 +181,6 @@ class ScenarioReferences:
             raise ScenarioError("event/operator time outside scenario horizon")
 
     def validate_reserved_service(self) -> None:
-        """The world owns ``system``; a scenario may not grant, fault, schedule or rule on it."""
         named = [
             *(service_id for actor in self.doc.actors for service_id in actor.read_services),
             *(service_id for actor in self.doc.actors for service_id in actor.operations),
@@ -276,8 +275,6 @@ class ScenarioReferences:
         self.validate_persona()
 
     def validate_persona(self) -> None:
-        """A persona answers every request itself, so it has no timed decisions, and it holds
-        exactly one brief per task (one brief with no task when the scenario has no tasks)."""
         persona = self.doc.operator.persona
         if persona is None:
             return

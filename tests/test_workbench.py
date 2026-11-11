@@ -260,7 +260,6 @@ def test_save_checks_etag_and_contract_and_writes_losslessly(tmp_path: Path):
     assert saved.status_code == 200, saved.text
     assert json.loads(path.read_bytes()) == edited
     assert saved.json()["checks"]["checks"][0]["label"] == "Order cancelled (edited)"
-    # The browser sends 1.0 as 1 and may reorder keys; reverting still restores the exact bytes.
     reverted = json.loads(original)
     reverted["faults"][0]["probability"] = 1
     reverted = dict(reversed(list(reverted.items())))

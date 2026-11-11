@@ -688,9 +688,6 @@ def test_an_unneeded_operator_decision_is_not_work_left_undone():
 
 
 class ScriptedHarness(HarnessAdapter):
-    """An in-process harness replaying (action, status) replies; a callable reply gets the
-    observation. It records every observation it is given."""
-
     def __init__(self, replies):
         super().__init__(["unused"], 1, None, HarnessRequirements(simulated_clock=False))
         self.replies = list(replies)
@@ -914,7 +911,6 @@ def test_state_and_trace_hold_the_same_value_for_a_padded_argument():
 def test_a_refused_call_is_logged_with_the_value_it_named_and_its_own_spelling(
     policy, reached_the_world
 ):
-    """The policy denies the draft, or allows it and the world refuses it for want of a grant."""
     from overnight.execution.runtime import run_scenario
 
     sent = {"to": ["operator"], "subject": "Resolved", "body": "Kept."}

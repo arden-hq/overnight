@@ -88,7 +88,6 @@ def limits(
     max_requests: int,
     max_request_bytes: int,
 ) -> tuple[Pricing | None, RequestBudget]:
-    """The caller's verified rates, if any, and the relay's request limits at those rates."""
     pricing = None
     if input_usd_per_million is not None or output_usd_per_million is not None:
         pricing = Pricing.model_validate(
@@ -113,18 +112,11 @@ def limits(
 async def relayed_client(
     provider: Provider, model: str, budget: RequestBudget, record: Callable[[JsonObject], None]
 ) -> AsyncGenerator[AsyncOpenAI]:
-    """Feather's model client, pointed at a loopback relay that alone holds the provider key.
-
-    The relay bounds the paid requests of the parent and its children together.
-    """
     route = endpoint(provider)
     key = api_key(route)
-    # Nothing Feather starts, such as its shell worker, needs the key.
     os.environ.pop(route.api_key_env, None)
     async with httpx.AsyncClient(timeout=120) as http:
         relay = ProviderRelay(budget, provider, model, key, http, record, capture=run_capture())
-        # A captured call answers only once the whole generation is done, so the client waits
-        # longer than the relay does.
         timeout = 120 if relay.capture is None else budget.capture_timeout_seconds + 30
         async with serve_http(relay.app) as url:
             try:
@@ -252,7 +244,6 @@ def run(
 
 
 def _provider(base_url: str | None, api_key_env: str | None) -> Provider:
-    """The shared provider contract: the key always comes from the variable named for its host."""
     if base_url is None:
         if api_key_env is not None:
             raise click.UsageError("--api-key-env needs --base-url")

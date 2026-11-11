@@ -1,9 +1,3 @@
-"""The verifiers wrap's contracts, against a fake OpenAI-compatible engine and no live model.
-
-Overnight runs from OVERNIGHT_PYTHON (default: the repository's `.venv`). The training-client test
-needs the Qwen3-0.6B tokenizer in the Hugging Face cache.
-"""
-
 import asyncio
 import json
 import os
@@ -24,13 +18,9 @@ REPOSITORY = Path(__file__).resolve().parents[2]
 PYTHON = os.environ.get("OVERNIGHT_PYTHON") or str(REPOSITORY / ".venv/bin/python")
 TOKENIZER = "Qwen/Qwen3-0.6B"
 KEY_VARIABLE = "FAKE_ENGINE_KEY"
-# Every reply, whoever asks: an operator answer that says nothing, and text for the agent.
 REPLY = '{"message": null}'
 OPERATOR = {"model": "operator/fixed"}
 
-# A process agent that calls the policy through Overnight's provider relay, as a connector does,
-# with capture off. Its one message names its episode folder, so a call shows whose it is, and
-# whether the operator's key reached it.
 RELAY_AGENT = """import json, os, pathlib, sys, time
 import anyio, httpx
 from overnight.adapters.http import serve_http
@@ -85,12 +75,10 @@ for count, line in enumerate(sys.stdin):
 
 
 def load_environment(family: Path, **options):
-    """The env with its operator seat pinned, as every config must pin it."""
     return _load_environment(family, operator=OPERATOR, **options)
 
 
 def fake_engine(received: list[dict]) -> web.Application:
-    """Chat completions for an eval client, and vLLM's token route for a training client."""
 
     async def chat(request: web.Request) -> web.StreamResponse:
         body = await request.json()
@@ -206,7 +194,6 @@ def scripted_task() -> OvernightTask:
 
 
 async def episodes(env, tasks, client: vf.ClientConfig) -> list[vf.Episode]:
-    """Run the tasks as concurrent episodes of one env, as a trainer's env worker does."""
     ctx = ModelContext(model="policy/v7", client=client)
     async with env.serving():
         return await asyncio.gather(*(env.run_episode(task, ctx) for task in tasks))
@@ -226,7 +213,6 @@ def test_rows_come_from_a_family_only_when_it_is_apart_from_the_held_out_cases(f
     assert [row.data.id for row in rows] == ["order-resolution-0100", "order-resolution-0101"]
     assert all(row.data.scenario["id"] == row.data.id for row in rows)
 
-    # The same folder named as held out overlaps itself, so it loads no row.
     overlapping = load_environment(family, taskset={"held_out": [str(family)]})
     with pytest.raises(ValueError, match="split check failed"):
         list(overlapping.taskset)
@@ -266,15 +252,12 @@ def test_policy_calls_land_on_the_trained_seat_with_token_ids(family, tmp_path):
     agent, operator = seat(episode, "agent"), seat(episode, "operator")
     assert episode.ok and agent.reward is not None
     assert agent.info["overnight"]["policy_model"] == "policy/v7"
-    # The agent's one call is on its own trainable trace, sampled tokens with their logprobs.
     assert agent.agent.trainable and not operator.agent.trainable
     assert len(agent.calls) == 1
     sampled = [node for node in agent.nodes if node.sampled]
     assert sampled and all(len(node.token_ids) and len(node.logprobs) for node in sampled)
     texts = json.dumps([n.model_dump(mode="json") for n in agent.nodes])
-    # The call names this episode, and the operator's secret never reached the agent.
     assert agent.info["overnight"]["episode"] in texts and "operator-key=False" in texts
-    # The operator answered through its own session, which never holds the agent's call.
     assert operator.calls and all(
         call.node not in {c.node for c in agent.calls} for call in operator.calls
     )
@@ -327,10 +310,8 @@ def test_an_engine_fault_errors_the_rollout_and_a_refused_request_scores_zero(fa
         finally:
             await runner.cleanup()
 
-    # The engine failed: the episode says nothing about the policy, so a trainer drops it.
     outage = seat(asyncio.run(run(500)), "agent")
     assert outage.has_error and "overnight" not in outage.info
-    # The engine refused the agent's own request: that is the agent's failure.
     refused = seat(asyncio.run(run(400)), "agent")
     assert not refused.has_error and refused.reward == 0.0
     assert refused.info["overnight"]["failure"]["kind"] == "agent"
@@ -366,9 +347,6 @@ def test_a_policy_call_the_engine_never_answered_errors_the_rollout(family, tmp_
         finally:
             await runner.cleanup()
 
-    # No engine fault is ever recorded, yet the episode says nothing about the policy, so it
-    # errors instead of scoring the agent 0: the harness gave up on the call, or the agent's
-    # deadline cut it.
     gave_up = seat(asyncio.run(run()), "agent")
     assert gave_up.has_error and "overnight" not in gave_up.info
     cut = seat(asyncio.run(run("patient")), "agent")
@@ -376,8 +354,6 @@ def test_a_policy_call_the_engine_never_answered_errors_the_rollout(family, tmp_
 
 
 def slow_engine(seconds: float, answered: list[float]) -> web.Application:
-    """The fake engine, answering each chat call `seconds` late; `answered` gets each answer's
-    time once it is sent."""
     engine = fake_engine([])
     (route,) = [r for r in engine.router.routes() if r.resource.canonical == "/v1/chat/completions"]
 
@@ -397,8 +373,6 @@ def test_a_policy_call_the_harness_gave_up_on_errors_the_rollout_when_answered_l
 ):
     async def run() -> tuple[vf.Episode, list[float], float]:
         answered: list[float] = []
-        # The agent's client gives up after 5 seconds and the agent fails 3 seconds later; the
-        # engine answers at 5.5, while the episode is still running.
         runner, url = await serve(slow_engine(5.5, answered))
         try:
             env = load_environment(family, agent=relay_agent(tmp_path, "linger"))
@@ -409,15 +383,11 @@ def test_a_policy_call_the_harness_gave_up_on_errors_the_rollout_when_answered_l
 
     episode, answered, ended = asyncio.run(run())
     trace = seat(episode, "agent")
-    # The engine answered within the episode and verifiers recorded the call as answered, yet
-    # the harness had already given up on it: the agent failure it caused says nothing about
-    # the policy, so the rollout errors instead of scoring 0.
     assert answered and answered[0] < ended
     assert trace.calls and all(call.error is None for call in trace.calls)
     assert trace.has_error and "overnight" not in trace.info
 
 
-# A process agent that stalls on its first observation, or reports to the operator on every one.
 PROCESS_AGENT = """import json, os, pathlib, sys, time
 pathlib.Path(os.environ["OVERNIGHT_PROVENANCE_PATH"]).write_text(json.dumps({
     "implementation": "process-agent",
@@ -499,7 +469,6 @@ def test_concurrent_rollouts_keep_their_own_calls(family, tmp_path):
     assert len(names) == 4
     for trace in traces:
         assert trace.ok and trace.reward is not None and len(trace.calls) == 1
-        # The trace's one user message names its own episode's folder and no other.
         own = trace.info["overnight"]["episode"]
         texts = json.dumps([node.model_dump(mode="json") for node in trace.nodes])
         assert own in texts and not any(other in texts for other in names - {own})

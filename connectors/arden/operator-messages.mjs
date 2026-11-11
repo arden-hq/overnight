@@ -12,9 +12,6 @@ export class OperatorMessages {
     this.reportedQuestions = new Set()
   }
 
-  /** Actionable native questions not yet reported, each as the report text the runner hands to
-   *  the operator: the prompt, its detail and its choices. The operator's next message answers
-   *  the question through `submit`. */
   async newQuestionReports(time) {
     const reports = []
     for (const question of await this.actionableQuestions()) {

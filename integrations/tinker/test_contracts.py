@@ -1,9 +1,3 @@
-"""The Tinker adapter's contracts, against a fake sampling client and a fake operator engine.
-
-No Tinker service, key or live model. Overnight runs from OVERNIGHT_PYTHON (default: the
-repository's `.venv`). Needs the Qwen3-0.6B tokenizer in the Hugging Face cache.
-"""
-
 import asyncio
 import json
 import os
@@ -26,12 +20,8 @@ REPOSITORY = Path(__file__).resolve().parents[2]
 PYTHON = os.environ.get("OVERNIGHT_PYTHON") or str(REPOSITORY / ".venv/bin/python")
 MODEL = "Qwen/Qwen3-0.6B"
 OPERATOR_KEY = "FAKE_OPERATOR_KEY"
-# An operator answer that says nothing, and the policy's reply text.
 REPLY = '{"message": null}'
 
-# A process agent that calls the policy through Overnight's provider relay, as a connector does,
-# with capture off. Its one message names its episode folder, so a call shows whose it is, and
-# whether a trainer secret reached it.
 RELAY_AGENT = """import json, os, pathlib, sys, time
 import anyio, httpx
 from overnight.adapters.http import serve_http
@@ -97,8 +87,6 @@ class Sample:
 
 
 class FakeSamplingClient:
-    """The step's sampling client: a fixed reply with logprobs, or an engine outage."""
-
     def __init__(self, fail: bool = False, delay: float = 0.0) -> None:
         tokenizer = get_tokenizer(MODEL)
         self.reply = tokenizer.encode(REPLY, add_special_tokens=False)
@@ -170,7 +158,6 @@ def operator_url():
     loop.run_until_complete(runner.setup())
     port = free_port()
     loop.run_until_complete(web.TCPSite(runner, "127.0.0.1", port).start())
-    # The engine serves from its own thread while each test runs its own loop.
     import threading
 
     thread = threading.Thread(target=loop.run_forever, daemon=True)
@@ -211,10 +198,9 @@ def builder(family: Path, tmp_path: Path, operator_url: str, *mode: str, **optio
 def rollout(
     group: OvernightEnvGroupBuilder, client: FakeSamplingClient, strategy: RolloutStrategy
 ) -> TrajectoryGroup | None:
-    """One group through the cookbook's own rollout entry point, as its training loop calls it."""
     return asyncio.run(
         do_group_rollout_and_filter_constant_reward(
-            client,  # type: ignore[arg-type]
+            client,
             group,
             max_tokens=64,
             temperature=1.0,
@@ -237,11 +223,9 @@ def test_cases_load_only_apart_from_the_held_out_cases_and_with_a_named_operator
     loaded = groups(builder(family, tmp_path, url, group_size=2))
     assert [group.case.id for group in loaded] == ["order-resolution-0100", "order-resolution-0101"]
 
-    # The same folder named as held out overlaps itself, so it loads no case.
     with pytest.raises(ValueError, match="split check failed"):
         groups(builder(family, tmp_path, url, held_out=(str(family),)))
 
-    # The operator must be a named model whose key the trainer holds.
     monkeypatch.delenv(OPERATOR_KEY)
     with pytest.raises(ValueError, match=OPERATOR_KEY):
         groups(builder(family, tmp_path, url))
@@ -273,19 +257,15 @@ def test_policy_calls_become_the_trajectory_and_the_score_its_reward(
         result.trajectories_G, result.get_total_rewards(), made, strict=True
     ):
         (transition,) = trajectory.transitions
-        # The sampled action is the policy's own, with its logprobs, and reaches training.
         assert transition.ac.tokens == client.reply
         assert transition.ac.logprobs == [-0.5] * len(client.reply)
         (datum,) = trajectory_to_data(trajectory, 1.0)
         assert -0.5 in datum.loss_fn_inputs["logprobs"].tolist()
-        # The episode's reward is Overnight's score, on its last transition.
         assert transition.episode_done and transition.metrics["overnight/agent_failure"] == 0.0
         assert env.result is not None and total == env.result["score"]
-        # The prompt names this episode and no other, and no trainer secret reached the agent.
         prompt = tokenizer.decode(transition.ob.to_ints())
         assert env.episode in prompt and not any(e in prompt for e in set(episodes) - {env.episode})
         assert "leaked=[]" in prompt
-    # The persona operator answered from its own model, never from the policy.
     assert len(operator_calls) > before
     assert not any((tmp_path / "episodes").iterdir())
 
@@ -301,7 +281,6 @@ def test_an_agent_failure_scores_zero_and_an_ungraded_episode_is_dropped(
     assert transition.ac.tokens and transition.metrics["overnight/agent_failure"] == 1.0
 
     drop = MinViableGroup(min_successful=1, max_retries=0)
-    # The agent cannot start: an infrastructure failure, so the group has nothing to train.
     missing = builder(family, tmp_path, url, group_size=1)
     (unstartable, _) = groups(missing)
     unstartable = OvernightEnvGroupBuilder(
@@ -313,12 +292,8 @@ def test_an_agent_failure_scores_zero_and_an_ungraded_episode_is_dropped(
         1,
     )
     assert rollout(unstartable, FakeSamplingClient(), drop) is None
-    # The proxy refused a request it cannot serve faithfully (a presence penalty), so the harness failed for
-    # a reason that is not the policy's.
     (refused, _) = groups(builder(family, tmp_path, url, "penalty", group_size=1))
     assert rollout(refused, FakeSamplingClient(), drop) is None
-    # The engine failed under the policy: the trainer's own sampling error drops the episode, and
-    # its worker and harness are stopped.
     (outage, _) = groups(builder(family, tmp_path, url, group_size=1))
     assert rollout(outage, FakeSamplingClient(fail=True), drop) is None
     assert not any((tmp_path / "episodes").iterdir())
@@ -329,14 +304,11 @@ def test_an_episode_scores_zero_for_time_only_when_every_policy_call_was_answere
 ):
     url, _ = operator_url
     drop = MinViableGroup(min_successful=1, max_retries=0)
-    # The harness gave up on a call while the sampler worked on it: dropped, never 0.
     (gave_up, _) = groups(builder(family, tmp_path, url, group_size=1))
     assert rollout(gave_up, FakeSamplingClient(delay=8), drop) is None
-    # The deadline passed while the sampler worked on a call the harness still waits for.
     timed = {"group_size": 1, "rollout_timeout_seconds": 12}
     (waiting, _) = groups(builder(family, tmp_path, url, "patient", **timed))
     assert rollout(waiting, FakeSamplingClient(delay=30), drop) is None
-    # Every call answered, then the agent ran out of time: 0, with the call it made.
     (stalled, _) = groups(builder(family, tmp_path, url, "stall", **timed))
     result = rollout(stalled, FakeSamplingClient(), drop)
     assert result is not None and result.get_total_rewards() == [0.0]

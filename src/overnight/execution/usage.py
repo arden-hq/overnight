@@ -36,7 +36,6 @@ def usage_path(provenance_path: Path) -> Path:
 
 
 def capture_path(provenance_path: Path) -> Path:
-    """Where a capturing process stores its model calls, beside its provenance sidecar."""
     return provenance_path.with_suffix(".capture.jsonl")
 
 

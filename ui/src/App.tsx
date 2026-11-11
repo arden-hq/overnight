@@ -21,7 +21,6 @@ function useTheme(): [string, () => void] {
     try {
       localStorage.setItem("overnight-theme", theme);
     } catch {
-      /* storage blocked */
     }
   }, [theme]);
   const toggle = () => {

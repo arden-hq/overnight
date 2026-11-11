@@ -22,7 +22,6 @@ for (const name of ["JsonValue", "FrozenJson", "JsonObject"]) {
   if (schema.$defs?.[name]) schema.$defs[name] = name === "JsonObject" ? { title: name, type: "object", additionalProperties: true, tsType: "{ [key: string]: unknown }" } : { title: name, tsType: "unknown" };
 }
 
-// Property titles ("Agent Kind") would each become a named alias; only the models keep names.
 const untitle = (node, keep) => {
   if (Array.isArray(node)) return node.forEach((item) => untitle(item, false));
   if (node === null || typeof node !== "object") return;

@@ -1,5 +1,3 @@
-"""Training cases from a generated scenario family, after Overnight's split check passes."""
-
 import json
 import os
 import subprocess
@@ -14,9 +12,6 @@ def overnight_python() -> str:
 
 @dataclass(frozen=True)
 class Case:
-    """One generated case: its id and scenario document, with its checks. The scenario never
-    reaches the agent from here; Overnight's runner decides what the agent sees."""
-
     id: str
     scenario: dict[str, Any]
 
@@ -27,7 +22,6 @@ class Case:
 
 
 def check_split(python: str, family: Path, held_out: list[Path]) -> None:
-    """Overnight's own split check; a family that overlaps the held-out cases loads nothing."""
     if not python:
         raise ValueError("set OVERNIGHT_PYTHON or `python` to Overnight's interpreter")
     command = [python, "-m", "overnight.families.split", str(family)]
@@ -39,8 +33,6 @@ def check_split(python: str, family: Path, held_out: list[Path]) -> None:
 
 
 def family_cases(python: str, family: Path, held_out: list[Path]) -> dict[str, Case]:
-    """Every case of a family written by `overnight generate`, by id. Only the scenario files
-    `family.json` lists, inside the family folder, are read."""
     family = family.resolve()
     check_split(python, family, held_out)
     index = json.loads((family / "family.json").read_text(encoding="utf-8"))

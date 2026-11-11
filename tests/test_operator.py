@@ -22,8 +22,6 @@ CALL_USAGE = ProcessUsage(calls=1, input_tokens=100, output_tokens=10, cost_usd=
 
 
 class FakeModel:
-    """A model transport stand-in: ``answer(prompt_text, expects)`` returns the raw reply text."""
-
     source = "model"
 
     def __init__(self, answer):
@@ -171,7 +169,6 @@ def cancel(id_):
 
 
 def by_brief(text, expects):
-    """Decide the way the asking chat's brief says: the prompt marks it as this chat."""
     if "Task catering (this chat)" in text:
         return '{"decision": "approve", "message": null}'
     return '{"decision": "deny", "message": "The catering chat is handling that."}'
@@ -415,8 +412,6 @@ def test_a_persona_scenario_has_one_brief_per_task_and_no_timed_decisions():
 
 
 class Provider(BaseHTTPRequestHandler):
-    """A stand-in provider: replies with ``reply(path)``; records each request it receives."""
-
     def do_POST(self):
         self._answer()
 

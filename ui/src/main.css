@@ -2,7 +2,6 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist-mono";
-/* Overnight's own components; in the components layer so Tailwind utilities can still override them. */
 @import "./index.css" layer(components);
 
 @custom-variant dark (&:is([data-theme="dark"] *));

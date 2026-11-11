@@ -43,12 +43,10 @@ def runtime_identity(runtime: Path, release: str):
     digest = hashlib.sha256(identity.sha256.encode())
     config = kernel / "pyvenv.cfg"
     if config.is_file():
-        # `home` is a machine-local path; the interpreter version and flags are the identity.
         lines = sorted(
             line for line in config.read_text().splitlines() if not line.startswith("home")
         )
         digest.update("\n".join(lines).encode())
-    # Every installed distribution's RECORD lists the hash of each of its files.
     for record in sorted(kernel.glob("lib/python*/site-packages/*.dist-info/RECORD")):
         digest.update(record.relative_to(kernel).as_posix().encode())
         digest.update(record.read_bytes())

@@ -46,7 +46,6 @@ def _allow_reference(validator: Callable) -> Callable:
     return validate
 
 
-# Strict Pydantic parameters reject 1.0 for an integer, so the template type check does too.
 TemplateValidator = validators.extend(
     Draft202012Validator,
     {name: _allow_reference(check) for name, check in Draft202012Validator.VALIDATORS.items()},
@@ -99,8 +98,6 @@ class OperationSpec[S: State, P: Parameters]:
 
     @property
     def input_schema(self) -> JsonObject:
-        # Every observation lists the operations, so the schema is built once per parameter type
-        # for the process; callers get their own copy.
         return deepcopy(_input_schema(self.parameters))
 
     def invoke(self, state: S, args: JsonObject, context: Context) -> JsonObject | Transition[S]:
@@ -110,10 +107,6 @@ class OperationSpec[S: State, P: Parameters]:
         self.parameters.model_validate(args)
 
     def canonical_args(self, args: JsonObject) -> JsonObject:
-        """The value the operation reads from ``args``: defaults filled in, text trimmed and name
-        sets sorted, so two spellings of one call have the same canonical arguments. An omitted
-        argument whose default is null stays omitted, because an explicit null can mean something
-        else (``update_event`` clears ``location`` on null and keeps it when omitted)."""
         parameters = self.parameters.model_validate(args)
         value = parameters.model_dump(mode="json", by_alias=True)
         for name, field in type(parameters).model_fields.items():

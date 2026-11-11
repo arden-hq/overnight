@@ -1,10 +1,3 @@
-"""The OpenEnv adapter's contracts, against a fake vLLM-style engine and no live model.
-
-Overnight runs from OVERNIGHT_PYTHON (default: the repository's `.venv`). TRL is not installed:
-`trl_rollout` follows the loop-owning branch of `_HarnessRolloutLoop._run_session` in
-`trl/experimental/async_grpo/openenv_harness.py` (TRL 92747c8), which needs torch to import.
-"""
-
 import json
 import os
 import subprocess
@@ -29,8 +22,6 @@ SECRETS = (OPERATOR_KEY, ENGINE_KEY, "HF_TOKEN")
 REPLY = '{"message": null}'
 SAMPLED = [11, 12, 13]
 
-# A process agent that calls the policy through Overnight's provider relay, as a connector does,
-# with capture off. Its one message names its episode folder and any secret it can read.
 RELAY_AGENT = """import json, os, pathlib, sys, time
 import anyio, httpx
 from overnight.adapters.http import serve_http
@@ -86,11 +77,6 @@ for count, line in enumerate(sys.stdin):
 
 
 class Engine:
-    """A vLLM-style chat completions endpoint that returns prompt and sampled token ids with
-    logprobs. The calls whose messages hold `fail_marker` fail, those with `slow_marker` are
-    answered after `slow_s`, and those with `bad_marker` get logprobs a capture cannot train on.
-    It records every body it gets."""
-
     def __init__(self, tokens: bool = True) -> None:
         self.tokens = tokens
         self.fail_marker = ""
@@ -227,7 +213,6 @@ class Outcome:
 
 
 def trl_rollout(sessions: OvernightSessionFactory, prompt) -> Outcome | None:
-    """One rollout as TRL's loop-owning path runs it; None is TRL's unscorable rollout."""
     try:
         session = sessions.create(prompt, seed=0, episode_id=uuid4().hex)
     except Exception:
@@ -271,10 +256,8 @@ def test_cases_load_only_apart_from_held_out_with_a_pinned_operator(family, engi
         "order-resolution-0100",
         "order-resolution-0101",
     ]
-    # A hand-written case is not a training task, whatever the prompt names.
     with pytest.raises(KeyError):
         sessions.create([{"role": "user", "content": "catering-chaos"}])
-    # The same folder named as held out overlaps itself, so no case loads.
     with pytest.raises(ValueError, match="split check failed"):
         factory(family, engines, agent(tmp_path), held_out=[family]).cases()
     with pytest.raises(ValueError, match="fixed operator model"):
@@ -295,18 +278,14 @@ def test_policy_calls_are_captured_with_tokens_and_the_score_is_the_reward(
     assert outcome is not None and outcome.exit_code == 0
     assert outcome.reward == outcome.result["score"] is not None
     assert outcome.result["policy_model"] == "policy/v7"
-    # The agent's one call, with the engine's sampled ids and logprobs, trained on its samples.
     (turn,) = outcome.trace.turns
     assert turn.completion_token_ids == SAMPLED and len(turn.per_token_logps) == 3
     assert turn.loss_mask == [0] * len(turn.prompt_token_ids) + [1, 1, 1]
     assert outcome.result["episode"] in texts(outcome.trace)
-    # No secret of the trainer's reached the agent.
     assert "leaked=[]" in texts(outcome.trace)
-    # The operator answered from its own engine; none of its calls reached the policy's.
     assert operator.received
     agent_calls = [body for body in policy.received if "agent: " in json.dumps(body)]
     assert len(agent_calls) == 1
-    # The proxy pinned the trainer's full-vocabulary policy and asked for token ids.
     assert agent_calls[0]["temperature"] == 0.7 and agent_calls[0]["top_p"] == 1.0
     assert agent_calls[0]["return_token_ids"] is True
 
@@ -324,7 +303,6 @@ def test_an_agent_failure_scores_zero_and_an_unusable_episode_is_dropped(family,
     )
     try:
         failed = trl_rollout(crashed, prompts(crashed)[0])
-        # The agent failed before any policy call: nothing to train on, dropped, not an error.
         assert trl_rollout(silent, prompts(silent)[0]) is None
         assert trl_rollout(unstartable, prompts(unstartable)[0]) is None
     finally:
@@ -349,10 +327,7 @@ def test_an_agent_scores_zero_for_time_only_when_every_policy_call_was_answered(
     family, engines, tmp_path
 ):
     policy, _ = engines
-    # Every policy call answered, then the agent stalls: TRL's timed-out path, reward 0.
     stalled = factory(family, engines, agent(tmp_path, "stall"), agent_timeout_s=10)
-    # The engine answered the first call and still worked on the second when the harness's
-    # relay gave up on it after 5 seconds; it answers before the episode ends: unscorable.
     policy.slow_marker, policy.slow_s = "again: ", 5.5
     waiting = factory(family, engines, agent(tmp_path, "twice"), agent_timeout_s=10)
     try:
@@ -368,7 +343,6 @@ def test_an_agent_scores_zero_for_time_only_when_every_policy_call_was_answered(
 
 def test_a_graded_episode_with_an_untrainable_capture_is_unscorable(family, engines, tmp_path):
     policy, _ = engines
-    # A fatal capture finding (a positive logprob) on a graded episode: TRL would stop training.
     policy.bad_marker = "agent: "
     sessions = factory(family, engines, agent(tmp_path))
     try:

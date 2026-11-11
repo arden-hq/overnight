@@ -1,9 +1,3 @@
-"""Train on a generated Overnight family with tinker-cookbook's RL loop.
-
-    python -m overnight_tinker.train family=DIR agent=agent.json operator_model=operator.json \
-        model_name=Qwen/Qwen3-8B log_path=DIR
-"""
-
 import asyncio
 
 import chz

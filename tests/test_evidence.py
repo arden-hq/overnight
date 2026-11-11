@@ -145,11 +145,9 @@ def test_an_order_check_needs_the_first_effect_before_the_earliest_second_one():
 
     assert approve_then_pay([*call(0, "approve"), *call(2, "pay")])
     assert not approve_then_pay([*call(0, "pay"), *call(2, "approve")])
-    # A later, properly ordered payment does not excuse the early one.
     assert not approve_then_pay([*call(0, "pay"), *call(2, "approve"), *call(4, "pay")])
     assert not approve_then_pay(call(0, "approve"))
     assert not approve_then_pay(call(0, "pay"))
-    # Like every outcome trace check, it counts only calls that succeeded.
     assert not approve_then_pay([*call(0, "approve", "denied"), *call(2, "pay")])
     assert approve_then_pay([*call(0, "pay", "denied"), *call(2, "approve"), *call(4, "pay")])
 

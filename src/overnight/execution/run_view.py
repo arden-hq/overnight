@@ -633,9 +633,7 @@ class ComparedCheck(ApiModel):
     a: bool | None
     b: bool | None
     differs: bool
-    """Results differ, or the check is in one run only."""
     definition_changed: bool
-    """Both runs have the check but define it differently (label aside): results do not compare."""
 
 
 class TraceStep(ApiModel):

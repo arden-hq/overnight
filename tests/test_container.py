@@ -30,7 +30,6 @@ pytestmark = pytest.mark.skipif(
 
 
 def _leftovers(*listing: str) -> str:
-    """Containers or networks this test process started and did not remove."""
     return subprocess.run(
         [
             "docker",

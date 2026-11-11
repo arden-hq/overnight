@@ -14,13 +14,11 @@ from overnight.services.state import State, distinct
 
 
 def trim_fields(fields: dict[str, JsonValue]) -> dict[str, JsonValue]:
-    """Surrounding whitespace never carries meaning, so top-level text fields are trimmed."""
     return {
         key: value.strip() if isinstance(value, str) else value for key, value in fields.items()
     }
 
 
-# Written fields are trimmed as parameters, so a call's arguments hold the value that is stored.
 RecordFields = Annotated[JsonObject, AfterValidator(trim_fields)]
 
 
@@ -101,7 +99,6 @@ class Collection(State):
         return self
 
     def check(self, row: Record) -> None:
-        """Raise, naming the field and what fits, when a record field breaks its rule."""
         for name, value in row.custom_fields.items():
             rule = self.fields.get(name)
             problem = None if rule is None else rule.problem(name, value)

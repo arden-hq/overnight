@@ -61,7 +61,6 @@ def _load_probes(path: Path) -> list[AuthoredProbe]:
 
 
 def _check_qa_files(path: Path, suite: Suite) -> None:
-    """Read every case's ``operator_answers`` and ``probes`` file, which only `suite qa` uses."""
     for case in suite.cases:
         if case.probes is not None:
             _load_probes(path.parent / case.probes)
@@ -99,7 +98,6 @@ def _resolve_input(
 def _operator_transport(
     resolved: ResolvedScenario, answers: Path | None
 ) -> OperatorTransport | None:
-    """Recorded answers when given; otherwise the persona's model, read from the environment."""
     persona = resolved.config.operator.persona
     if persona is None:
         return None
@@ -289,7 +287,7 @@ def generate_cases(family: str, count: int, seed: int, out: Path) -> int:
     except BaseException:
         if staging is not None:
             shutil.rmtree(staging, ignore_errors=True)
-        for path in created:  # Deepest first; a directory something else filled stays.
+        for path in created:
             try:
                 path.rmdir()
             except OSError:

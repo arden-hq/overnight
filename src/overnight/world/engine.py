@@ -30,7 +30,6 @@ from overnight.world.predicates import resolve_references
 
 
 def _failure_message(error: ValueError) -> str:
-    """Render validation errors without Pydantic's version-specific documentation URLs."""
     if not isinstance(error, ValidationError):
         return str(error)
     problems = [
@@ -162,7 +161,6 @@ class World:
         return self._queue.pending_ids
 
     def next_wake_time(self) -> int | None:
-        """The earliest of the next event, the next scheduled reminder and the next wait timeout."""
         dispatch = self._queue.next(now=self.now, state_for=self._state_for, results=self._results)
         times = (
             dispatch.time if dispatch is not None else None,
@@ -225,7 +223,6 @@ class World:
         return False
 
     def can_see(self, actor: Actor, service_id: str) -> bool:
-        """Whether a write to the service can concern the actor: it reads it or holds a grant."""
         if service_id == SYSTEM_SERVICE:
             return actor.role == ActorRole.AGENT
         if service_id in actor.read_services or WILDCARD in actor.read_services:
@@ -266,8 +263,6 @@ class World:
         return result
 
     def canonical_args(self, service_id: str, operation: str, args: object) -> object:
-        """The arguments as the operation reads them (trimmed, sorted, defaults filled), so the
-        trace holds the value the service acts on; ``args`` as given when they do not fit it."""
         session = self._sessions.get(service_id)
         spec = None if session is None else session.operations.get(operation)
         if spec is None or not isinstance(args, dict):
@@ -278,9 +273,6 @@ class World:
             return args
 
     def read_args(self, invocation: Invocation, trusted_event: bool = False) -> object:
-        """A call's arguments as its operation would read them: references resolved where they
-        can be, then `canonical_args`. Every trace entry of a call records this one value,
-        whether the call ran, failed or never reached the world."""
         args: object = invocation.args
         try:
             resolved = resolve_references(
@@ -432,8 +424,6 @@ class World:
     def invoke(
         self, invocation: Invocation, *, _event_id: str | None = None
     ) -> Result | PendingWait:
-        """Run one invocation. ``system.wait_for_notification`` returns a ``PendingWait`` until a
-        notification or its timeout settles it; its result is then recorded under the same id."""
         if not invocation.id or invocation.id in self._results:
             raise InvocationRejected("duplicate or empty invocation ID")
         if _event_id is None and invocation.id in self._invocation_ids:
@@ -468,8 +458,6 @@ class World:
             raise
 
     def advance(self, to: int) -> tuple[Result, ...]:
-        """Move time to ``to``. At each time: due events in insertion order, then due reminders by
-        (due, id), then pending waits settle."""
         if type(to) is not int or to < self.now:
             raise ValueError("time must advance monotonically by integer seconds")
         produced: list[Result] = []
@@ -612,7 +600,6 @@ class World:
         )
 
     def open_inbox(self, actor_id: str, chat_id: str | None) -> None:
-        """Start the actor's inbox for a chat; earlier notifications are not offered to it."""
         self._notifications.open(actor_id, chat_id)
 
     def undelivered(self, actor_id: str, chat_id: str | None) -> list[Notification]:
@@ -629,7 +616,6 @@ class World:
             )
 
     def expire(self, actor_id: str, chat_id: str | None) -> None:
-        """Time out the inbox's pending waits now, as when its task reaches a deadline."""
         for settled in self._notifications.expire(actor_id, chat_id):
             self._record_wait(settled)
 
@@ -652,8 +638,6 @@ class World:
         self._settle()
 
     def observe(self, actor_id: str, chat_id: str | None = None) -> JsonObject:
-        """The actor's view: readable services and its own results; with ``chat_id``, only the
-        results of calls made in that chat."""
         actor = self.actors.get(actor_id)
         if actor is None:
             raise ValueError("unknown actor")

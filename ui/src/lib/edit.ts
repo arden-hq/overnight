@@ -27,7 +27,6 @@ export function parsePath(text: string): (string | number)[] {
       const parsed: unknown = JSON.parse(trimmed);
       if (Array.isArray(parsed)) return parsed.map((p) => (typeof p === "number" ? p : String(p)));
     } catch {
-      /* read as dotted text */
     }
   }
   const parts: (string | number)[] = [];

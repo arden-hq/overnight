@@ -87,8 +87,6 @@ class ExecutionPolicy:
         return PolicyDecision(invocation, self.revision, key)
 
     def consume(self, invocation: Invocation) -> None:
-        """An approval covers the one invocation it answered and is used up by its attempt. A
-        retry, even of an identical call after a failure, is a new request."""
         self.pending.pop(invocation.id, None)
         self.approved.discard(_approval_fingerprint(invocation, self.revision))
 

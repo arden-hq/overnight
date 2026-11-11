@@ -33,8 +33,6 @@ class OutcomeCounts(ReportModel):
 
 
 class ArmSpend(ReportModel):
-    """Everything an arm consumed, retries included. None means not measured."""
-
     seconds: float | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None

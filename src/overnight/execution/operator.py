@@ -1,11 +1,3 @@
-"""The operator: the user who gave the agent its tasks.
-
-One interface answers every agent report and every approval request. ``ScriptedOperator`` decides
-by timed steps and never answers reports; it exists for examples and tests that run without a
-model. ``PersonaOperator`` answers each request at its world time from the scenario's private
-brief through an injected transport. This module performs no I/O: a model transport lives in
-``overnight.adapters.operator_model``."""
-
 import hashlib
 import json
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -43,13 +35,9 @@ type Expects = Literal["reply", "decision"]
 type StepKey = tuple[int, int]
 type Message = dict[str, str]
 type Canonical = Callable[[str, str, JsonObject], JsonObject]
-"""The arguments an operation reads from a request: (service_id, operation, args) -> value."""
 
 
 class OperatorError(AdapterError):
-    """The operator could not answer a request. Nothing is approved, denied or sent for it.
-    ``calls`` holds the model calls made for the request, for the trace."""
-
     def __init__(self, message: str, calls: Sequence["OperatorCall"] = ()) -> None:
         super().__init__(message)
         self.calls = list(calls)
@@ -72,8 +60,6 @@ class EvidenceModel(BaseModel):
 
 
 class OperatorCall(EvidenceModel):
-    """One model call: the exact messages sent, their digest, the raw text and its usage."""
-
     prompt: list[Message]
     prompt_sha256: str
     raw: str
@@ -81,8 +67,6 @@ class OperatorCall(EvidenceModel):
 
 
 class AnswerEvidence(EvidenceModel):
-    """How an answer was produced. Recorded in the trace, never shown to the agent."""
-
     source: Literal["scripted", "model", "recorded", "authored", "qa"]
     prompt_version: str | None = None
     model: str | None = None
@@ -105,8 +89,6 @@ class TranscriptLine:
 
 @dataclass(frozen=True)
 class OperatorView:
-    """What the user sees when asked: the asking task and that chat's conversation so far."""
-
     task_id: str | None
     transcript: Sequence[TranscriptLine]
 
@@ -133,29 +115,17 @@ class OperatorTransport(Protocol):
 
 
 class Operator(Protocol):
-    def answer(self, request: OperatorRequest, view: OperatorView) -> AnsweredRequest | None:
-        """Answer a request at its world time. None: no answer now (scripted only)."""
-        ...
+    def answer(self, request: OperatorRequest, view: OperatorView) -> AnsweredRequest | None: ...
 
     def due(
         self, now: int, open: Sequence[ApprovalRequest], before: StepKey | None = None
-    ) -> list[AnsweredRequest]:
-        """Answers that become due by time (scripted only), in step order. With ``before``, only
-        those of steps ordered before that (at, source index) key, so timed decisions interleave
-        with the shared schedule's steps exactly in source order."""
-        ...
+    ) -> list[AnsweredRequest]: ...
 
-    def next_time(self, now: int) -> int | None:
-        """The next time a timed answer is scheduled, whether or not a request waits for it."""
-        ...
+    def next_time(self, now: int) -> int | None: ...
 
-    def next_work_time(self, now: int, open: Sequence[ApprovalRequest]) -> int | None:
-        """The next time a timed answer is due for a request that is waiting for it."""
-        ...
+    def next_work_time(self, now: int, open: Sequence[ApprovalRequest]) -> int | None: ...
 
-    def outstanding(self, open: Sequence[ApprovalRequest]) -> list[str]:
-        """Answers still owed to waiting requests, as step kinds."""
-        ...
+    def outstanding(self, open: Sequence[ApprovalRequest]) -> list[str]: ...
 
     def finish(self) -> None: ...
 
@@ -166,7 +136,6 @@ class Operator(Protocol):
 
 
 def canonical_arguments(config: Scenario, definitions: Mapping[str, ServiceBoundary]) -> Canonical:
-    """Read arguments through each operation's parameters, so two spellings of one value agree."""
     kinds = {service.id: service.kind for service in config.services}
 
     def canonical(service_id: str, operation: str, args: JsonObject) -> JsonObject:
@@ -179,11 +148,6 @@ def canonical_arguments(config: Scenario, definitions: Mapping[str, ServiceBound
 
 
 class ScriptedOperator:
-    """Timed approve/deny steps. Each applies to the oldest open request for its service and
-    operation whose arguments name the same value as the step's: both are read through the
-    operation's parameters, so defaults, surrounding whitespace and name order do not matter. A
-    step with no such request waits for one."""
-
     def __init__(self, steps: Iterable[OperatorStep], canonical: Canonical) -> None:
         indexed = [
             (index, step) for index, step in enumerate(steps) if isinstance(step, ScheduledDecision)
@@ -191,7 +155,6 @@ class ScriptedOperator:
         self.steps = sorted(indexed, key=lambda item: (item[1].at, item[0]))
         self.completed: set[int] = set()
         self.canonical = canonical
-        # A step naming no single operation (``*``) has no value to compare and matches nothing.
         self.wanted = {
             index: self._read(step.match.service_id, step.match.operation, step.match.args)
             for index, step in indexed
@@ -199,7 +162,6 @@ class ScriptedOperator:
         self.asked: dict[str, JsonObject | None] = {}
 
     def _read(self, service_id: str, operation: str, args: JsonObject) -> JsonObject | None:
-        """Canonical arguments; None when the operation would reject them."""
         try:
             return self.canonical(service_id, operation, args)
         except ValueError:
@@ -360,9 +322,6 @@ def _parse(text: str, expects: Expects) -> ReplyOutput | DecisionOutput:
 
 
 class PersonaOperator:
-    """Answers as the scenario's persona. Each prompt is rebuilt from what the user was shown,
-    so there is no hidden model memory and a recorded run replays exactly."""
-
     def __init__(
         self,
         persona: OperatorPersona,
@@ -502,8 +461,6 @@ class PersonaOperator:
         self.transport.finish()
 
     def provenance(self) -> JsonObject:
-        """The configured model, and the model and settings a provider actually reported. A
-        replay or QA run names no model, because none answered."""
         model = self.persona.model
         return {
             "kind": "persona",
@@ -527,15 +484,12 @@ def _reason(error: Exception) -> str:
 
 @dataclass
 class RecordedTransport:
-    """Replays recorded model answers strictly in order, keyed by the exact prompt digest."""
-
     records: list[tuple[str, str]]
     source: Literal["recorded"] = "recorded"
     position: int = field(default=0)
 
     @classmethod
     def from_entries(cls, entries: Iterable[JsonObject]) -> "RecordedTransport":
-        """Read ``operator_answer`` trace entries, or bare ``operator_answer`` payloads."""
         records: list[tuple[str, str]] = []
         for entry in entries:
             payload = entry.get("payload") if entry.get("kind") == "operator_answer" else entry
@@ -575,9 +529,6 @@ class RecordedTransport:
 
 
 class QaTransport:
-    """For QA sham probes: replies to nothing and denies every approval, so a sham gets strictly
-    less help than any operator would give."""
-
     source: Literal["qa"] = "qa"
 
     def complete(self, prompt: Sequence[Message], expects: Expects) -> Completion:
@@ -597,7 +548,6 @@ def make_operator(
     transport: OperatorTransport | None,
     definitions: Mapping[str, ServiceBoundary],
 ) -> Operator:
-    """The single place that picks the operator for a run."""
     persona = config.operator.persona
     if persona is None:
         if transport is not None:

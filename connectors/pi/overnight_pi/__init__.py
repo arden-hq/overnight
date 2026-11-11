@@ -24,8 +24,6 @@ class PackageMetadata(BaseModel):
     version: str
 
 
-# Pi reaches the provider only through the connector's loopback relay, which holds the key and
-# bounds paid requests. Pi gets the relay's per-run token in this variable.
 RELAY_KEY_ENV = "OVERNIGHT_PI_PROXY_KEY"
 
 
@@ -44,8 +42,6 @@ class PiOptions(RequestBudget):
 
 
 def _reasoning(options: PiOptions) -> JsonObject:
-    # A provider effort is what Pi sends with thinking off. Pi sends an effort only for a
-    # reasoning model, so the model is declared reasoning-capable.
     off = endpoint(options.provider).reasoning_effort
     if off is None:
         return {"reasoning": options.reasoning}

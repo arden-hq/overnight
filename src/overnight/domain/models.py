@@ -55,8 +55,6 @@ class ServiceInstance:
 
 @dataclass(frozen=True)
 class Notice:
-    """What a handler landed for whom; the world turns it into notifications after commit."""
-
     recipients: tuple[str, ...]
     kind: NotificationKind
     ref: str
@@ -101,8 +99,6 @@ class Result(Fact):
 
 
 class PendingWait(Fact):
-    """A ``system.wait_for_notification`` call that no notification or timeout has settled yet."""
-
     invocation: Invocation
     since: int
     until: int

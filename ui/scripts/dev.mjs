@@ -4,9 +4,6 @@ import { resolve } from "node:path"
 
 const root = resolve(import.meta.dirname, "../..")
 
-// The API scans run and scenario roots relative to the repository, so it starts there. It uses the
-// repository venv when there is one (not `uv run`, which may prune dependencies under concurrent
-// commands), and otherwise the installed `overnight` command on PATH.
 const venv = resolve(root, ".venv/bin/overnight")
 const overnight = existsSync(venv) ? venv : "overnight"
 const api = spawn(overnight, ["serve"], { stdio: "inherit", cwd: root })

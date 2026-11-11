@@ -105,9 +105,6 @@ class RunResult:
 
 
 class OperatorSchedule:
-    """The operator's timed message, status and policy steps in (at, source index) order. Both
-    operators share them; timed decisions belong to the scripted operator."""
-
     def __init__(self, steps: list[OperatorStep]) -> None:
         self.steps = sorted(
             (
@@ -132,11 +129,9 @@ class OperatorSchedule:
             yield index, step
 
     def next_time(self, now: int) -> int | None:
-        """The next time any step is due."""
         return min((step.at for _, step in self._open() if step.at > now), default=None)
 
     def next_work_time(self, now: int, chat_id: str | None) -> int | None:
-        """The next step that is still work for a chat: its messages, status and policy steps."""
         return min(
             (
                 step.at
@@ -169,10 +164,6 @@ FINISHED: frozenset[str] = frozenset({"done", "deadline"})
 
 @dataclass(frozen=True)
 class Block:
-    """Why an active lane is not observed: until a time, until a receipt settles, or both (either
-    wakes it). With neither, it waits for the end of the run. ``offered`` holds the notifications
-    the lane had already been shown when it blocked; only a newer one wakes a harness lane early."""
-
     until: int | None = None
     receipt_id: str | None = None
     offered: frozenset[str] = frozenset()
@@ -180,9 +171,6 @@ class Block:
 
 @dataclass(kw_only=True)
 class Lane:
-    """One conversation with the agent. A harness lane is idle after its turn ends and is observed
-    again only when a notification for it exists or its native wake comes."""
-
     chat_id: str | None
     status: LaneStatus = "active"
     block: Block | None = None
@@ -274,7 +262,6 @@ class Trial:
             self.apply_answer(answered)
 
     def open_requests(self) -> list[ApprovalRequest]:
-        """Approval requests still awaiting a decision, oldest first."""
         return [
             request
             for invocation_id, request in self.open_approvals.items()
@@ -307,12 +294,9 @@ class Trial:
         )
 
     def transcript_chat(self, request: OperatorRequest) -> str | None:
-        """The chat whose conversation the operator is shown; None shows every entry."""
         return None
 
     def transcript(self, request: OperatorRequest, before: int) -> list[TranscriptLine]:
-        """What the user saw in the asking chat before this request: their messages, the agent's
-        reports, earlier approval requests and their decisions. No tools, state or checks."""
         chat_id = self.transcript_chat(request)
         lines: list[TranscriptLine] = []
         for entry in self.world.trace[:before]:
@@ -336,9 +320,6 @@ class Trial:
         return lines
 
     def consult(self, request: OperatorRequest, before: int) -> None:
-        """Hand one request to the operator at the current world time and apply its answer. An
-        approval request stays open until answered; a report request enters the trace only when
-        the operator answers it or fails to, since an operator may leave reports unanswered."""
         view = OperatorView(request.task_id, self.transcript(request, before))
         invocation_id = request.invocation_id if isinstance(request, ApprovalRequest) else None
         if isinstance(request, ApprovalRequest):
@@ -383,7 +364,6 @@ class Trial:
         return f"op-{len(self.requests) + 1}"
 
     def apply_answer(self, answered: AnsweredRequest) -> None:
-        """Apply an answer to the exact request it names, then send its message to that chat."""
         answer = answered.answer
         request = self.requests[answer.request_id]
         self.world.record(
@@ -548,7 +528,6 @@ class Trial:
                 )
 
     def collect_waits(self) -> None:
-        """Add the result receipt of every wait the world has settled since the last look."""
         for invocation_id in list(self.waiting):
             result = self.world.results.get(invocation_id)
             if result is not None:
@@ -568,9 +547,6 @@ class Trial:
         return receipts[-1] if receipts else None
 
     def unsettled(self, receipt: Receipt) -> bool:
-        """Whether a receipt still awaits its outcome: a wait the world has not resolved, or an
-        approval request the operator can still decide. A policy change cancels the requests it
-        clears, so their ``pending`` receipts await nothing."""
         if receipt.status == ResultStatus.WAITING:
             return True
         return receipt.status == PolicyOutcome.PENDING and self.policy.awaiting_decision(
@@ -608,8 +584,6 @@ class Trial:
         )
 
     def finish_lane(self, lane: Lane, status: LaneStatus) -> None:
-        """End a lane. A lane that held its chat (active or idle) leaves nothing behind in it: the
-        harness's native work is cancelled and the lane's open waits time out now."""
         if lane.status in {"active", "idle"}:
             self.retire_chat(lane)
         lane.status = status
@@ -634,8 +608,6 @@ class Trial:
         self.expire_waits(lane)
 
     def expire_waits(self, lane: Lane) -> None:
-        """Time out the lane's open waits now and record their results, so no wait outlives the
-        turn that made it and takes a notification meant for a later turn."""
         self.world.expire(self.actors.agent, lane.chat_id)
         self.collect_waits()
 
@@ -661,7 +633,6 @@ class Trial:
                 self.invoke_lane(lane, action)
             case ReportAction():
                 before = len(self.world.trace)
-                # Surrounding whitespace of a report never decides a check, so it is stored trimmed.
                 self.record_report(lane, action.message.strip())
                 self.consult(
                     ReportRequest(
@@ -738,8 +709,6 @@ class Trial:
         return None
 
     def next_time(self) -> int:
-        """The next time anything can happen: an event, reminder or wait timeout, an operator step,
-        a lane's wake, a task start or deadline, or the horizon."""
         now = self.world.now
         times = [
             self.config.horizon,
@@ -757,8 +726,6 @@ class Trial:
         return min((time for time in times if time is not None and time > now), default=now)
 
     def has_source(self, lane: Lane) -> bool:
-        """Whether something can still reach an idle lane before it must end: a world wake, an
-        operator step for its chat, a task start, or its native wake."""
         now = self.world.now
         deadline = lane.deadline
         times = [
@@ -776,7 +743,6 @@ class Trial:
         )
 
     def complete_quiescent(self) -> bool:
-        """End idle lanes as done once no lane is active and nothing can reach any idle one."""
         unfinished = [lane for lane in self.lanes if lane.status not in FINISHED]
         idle = [lane for lane in unfinished if lane.status == "idle"]
         if not idle or any(lane.status == "active" for lane in unfinished):

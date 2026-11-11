@@ -3,10 +3,7 @@ name = "overnight-verifiers"
 version = "0.1.0"
 description = "Overnight scenario families as a verifiers v1 environment for RL trainers"
 license = "Apache-2.0"
-# verifiers 0.4 supports Python 3.11 to 3.14. Overnight itself is not imported here: it runs in
-# its own Python 3.14 environment, named by OVERNIGHT_PYTHON.
 requires-python = ">=3.12,<3.15"
-# aiohttp (a verifiers dependency) serves the policy forwarder.
 dependencies = ["verifiers>=0.4.1,<0.5", "aiohttp>=3.9"]
 
 [project.optional-dependencies]

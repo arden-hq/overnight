@@ -283,7 +283,6 @@ def test_steering_maps_opaque_control_target_to_bound_native_session() -> None:
 
 
 def relay_exchange(options: OpenCodeOptions, bodies: list[bytes], reply: bytes, content_type: str):
-    """Send each body through a relay to a fake provider; return replies, paid calls, records."""
     paid: list[httpx.Request] = []
     records: list[dict] = []
 

@@ -32,12 +32,6 @@ def _scrub_environment(environment: dict[str, str]) -> dict[str, str]:
 
 
 class ScrubbedShellRuntime(LocalShellRuntime):
-    """Feather's shell worker inherits `os.environ` with no override, so wrap its builder.
-
-    The model's bash tool runs in this worker with the evidence workspace readable, so provider
-    keys and connector settings must not be inherited from the host process.
-    """
-
     async def __aenter__(self):
         original = feather_process._task_environment
         if not getattr(original, "overnight_scrubbed", False):

@@ -1,13 +1,3 @@
-"""Overnight's rollout worker as the program of a verifiers rollout.
-
-verifiers owns the model endpoint: each rollout gets an interception endpoint and a secret, and
-every call through it lands on the rollout's trace (with token ids under a training client). This
-harness starts one Overnight rollout worker for the episode and hands it that endpoint, through a
-loopback forwarder that counts the calls the agent gave up on, as the policy, so Overnight's
-runner, world, connectors and checks run the episode as they would anywhere else. The worker runs
-without its own token capture: the trace is the record.
-"""
-
 import asyncio
 import contextlib
 import json
@@ -38,15 +28,11 @@ STOP_SECONDS = 20.0
 
 @dataclass(frozen=True)
 class Connection:
-    """One role's interception session: where its calls go and the secret that names it."""
-
     endpoint: str
     secret: str
     model: str
 
 
-# Each episode's sessions by role name, set by `OvernightEnv.run` in the episode's own context, so
-# concurrent episodes never see each other's sessions.
 EPISODE_SESSIONS: ContextVar[dict[str, Connection]] = ContextVar("overnight_episode_sessions")
 
 
@@ -67,9 +53,6 @@ class OvernightHarnessConfig(vf.HarnessConfig):
 
 
 class OvernightHarness(vf.Harness[OvernightHarnessConfig]):
-    """Runs one Overnight episode per rollout through `overnight.adapters.rollout`. The worker
-    is a host process: Overnight decides whether the agent runs in a container."""
-
     NEEDS_CONTAINER = False
 
     def __init__(self, config: OvernightHarnessConfig) -> None:
@@ -124,22 +107,14 @@ class OvernightHarness(vf.Harness[OvernightHarnessConfig]):
                 "set OVERNIGHT_PYTHON or harness.python to Overnight's interpreter"
             )
         operator = EPISODE_SESSIONS.get({}).get("operator")
-        # The agent calls the policy through a forwarder that sees which calls it gave up on;
-        # verifiers' own record shows the engine's side only.
         forwarder = PolicyForwarder(endpoint)
         async with forwarder.serving() as forwarded:
             policy = Connection(forwarded, secret, ctx.model)
             request = self._request(trace.id, data.scenario, policy, operator)
-            # The agent's own key is its rollout's secret, which it needs anyway. The worker
-            # restarts with its allow list, the harness's `env` and that key only
-            # (`--clean-env`).
             environ = os.environ | self.config.resolved_env | {POLICY_KEY: secret}
             passed = [POLICY_KEY, *self.config.resolved_env]
-            # A rollout its agent deadline cancels records its unanswered calls.
             result = await self._run_worker(json.dumps(request), environ, passed, trace, forwarder)
             unanswered = forwarder.unanswered
-        # A call the harness gave up on, for example at its client's timeout, decides the
-        # episode as an engine fault would, whether or not the engine answered it later.
         if unanswered:
             raise OvernightError(
                 f"the episode ended with {unanswered} policy call(s) the harness got no answer to"
@@ -149,8 +124,6 @@ class OvernightHarness(vf.Harness[OvernightHarnessConfig]):
         failure = result["failure"]
         if failure is not None and failure["kind"] == "infrastructure":
             raise OvernightError(f"Overnight infrastructure failure: {failure}")
-        # An engine fault under the policy decides the episode whatever the agent did next, so
-        # the rollout says nothing about the policy, even when the agent recovered.
         fault = engine_fault(trace)
         if fault is not None:
             raise OvernightError(f"the model engine failed under the policy: {fault}")
@@ -160,7 +133,6 @@ class OvernightHarness(vf.Harness[OvernightHarnessConfig]):
             "verdict": result["verdict"],
             "score": result["score"],
             "failure": failure,
-            # The model name the trainer served this rollout under, for staleness checks.
             "policy_model": result["policy_model"],
             "usage": result["usage"],
             "operator_usage": result["operator_usage"],
@@ -198,7 +170,6 @@ class OvernightHarness(vf.Harness[OvernightHarnessConfig]):
         try:
             stdout, stderr = await process.communicate(line.encode() + b"\n")
         except BaseException:
-            # Counted before the stop, which ends the harness and lets the engine catch up.
             trace.info[UNANSWERED] = forwarder.unanswered
             await asyncio.shield(_stop(process))
             raise
@@ -212,8 +183,6 @@ class OvernightHarness(vf.Harness[OvernightHarnessConfig]):
 
 
 async def _stop(process: asyncio.subprocess.Process) -> None:
-    """Interrupt the worker so its runner removes the episode's processes and containers, then
-    kill what is left of its process group."""
     if process.returncode is not None:
         return
     with contextlib.suppress(ProcessLookupError):

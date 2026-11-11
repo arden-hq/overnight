@@ -1,11 +1,3 @@
-"""Write the operator answers that `overnight run --operator-answers` replays for the
-shared-world oracle (examples/shared-world-chaos-operator.jsonl).
-
-The answers are authored, not model output: each one follows the persona's brief for the
-request it answers, and its evidence says `"source": "authored"`. Rerun this script whenever the
-operator prompt, the brief or the oracle plan changes, since a replay must match each prompt.
-"""
-
 import json
 from collections.abc import Sequence
 from pathlib import Path
@@ -23,10 +15,6 @@ ANSWERS = ROOT / "examples/shared-world-chaos-operator.jsonl"
 
 
 class AuthoredAnswers:
-    """Dana's answers by her brief: the catering chat may cancel order original once the
-    assistant reports the vendor confirmed a full refund, retries included; any other chat is
-    denied; other messages need no reply."""
-
     source = "authored"
 
     def complete(self, prompt: Sequence[Message], expects: Expects) -> Completion:
@@ -48,8 +36,6 @@ class AuthoredAnswers:
 
 
 def authored_lines() -> list[str]:
-    """The answers from one oracle run. The oracle's command is relative to the repository root,
-    so run this from there."""
     result = run_scenario(
         resolve_scenario(load_json(SCENARIO)),
         operator_transport=AuthoredAnswers(),
