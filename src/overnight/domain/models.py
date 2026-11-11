@@ -5,6 +5,7 @@ from pydantic import JsonValue
 
 from overnight.domain.contracts import Actor, Event, Fact, Invocation, JsonObject
 from overnight.domain.immutable import FrozenJson
+from overnight.domain.values import text_equal
 from overnight.domain.vocabulary import NotificationKind, ResultStatus
 
 
@@ -14,7 +15,7 @@ def json_equal(left: object, right: object) -> bool:
     if isinstance(left, (int, float)) and isinstance(right, (int, float)):
         return left == right
     if isinstance(left, str) and isinstance(right, str):
-        return left == right
+        return text_equal(left, right)
     if isinstance(left, Mapping):
         if not isinstance(right, Mapping):
             return False

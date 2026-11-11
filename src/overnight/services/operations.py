@@ -67,6 +67,7 @@ class OperationDescription(Protocol):
     def input_schema(self) -> JsonObject: ...
     def validate_template(self, args: FrozenObject | JsonObject) -> None: ...
     def validate_args(self, args: JsonObject) -> None: ...
+    def canonical_args(self, args: JsonObject) -> JsonObject: ...
 
 
 class Operation[S: State](OperationDescription, Protocol):
@@ -107,6 +108,18 @@ class OperationSpec[S: State, P: Parameters]:
 
     def validate_args(self, args: JsonObject) -> None:
         self.parameters.model_validate(args)
+
+    def canonical_args(self, args: JsonObject) -> JsonObject:
+        """The value the operation reads from ``args``: defaults filled in, text trimmed and name
+        sets sorted, so two spellings of one call have the same canonical arguments. An omitted
+        argument whose default is null stays omitted, because an explicit null can mean something
+        else (``update_event`` clears ``location`` on null and keeps it when omitted)."""
+        parameters = self.parameters.model_validate(args)
+        value = parameters.model_dump(mode="json", by_alias=True)
+        for name, field in type(parameters).model_fields.items():
+            if name not in parameters.model_fields_set and getattr(parameters, name) is None:
+                del value[field.serialization_alias or field.alias or name]
+        return value
 
     def validate_template(self, args: FrozenObject | JsonObject) -> None:
         try:

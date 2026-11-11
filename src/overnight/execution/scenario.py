@@ -261,7 +261,18 @@ class ScenarioReferences:
             if isinstance(step, OperatorPolicy):
                 self.require_operation(step.service_id, step.operation)
             if isinstance(step, ScheduledDecision):
-                self.require_operation(step.match.service_id, step.match.operation)
+                match = step.match
+                self.require_operation(match.service_id, match.operation)
+                if match.operation == WILDCARD:
+                    continue
+                kind = self.services[match.service_id].kind
+                try:
+                    self.definitions[kind].operations[match.operation].validate_args(match.args)
+                except ValueError as error:
+                    raise ScenarioError(
+                        f"operator decision arguments do not fit "
+                        f"{match.service_id}.{match.operation}: {error}"
+                    ) from error
         self.validate_persona()
 
     def validate_persona(self) -> None:

@@ -1,9 +1,9 @@
 from collections.abc import Mapping
-from typing import Annotated, Self
+from typing import Self
 
 from pydantic import Field, JsonValue, model_validator
 
-from overnight.domain.contracts import JsonObject, Names, NonemptyNames, Text
+from overnight.domain.contracts import JsonObject, NonemptyNameSet, Text
 from overnight.domain.models import Actor, Context
 from overnight.domain.vocabulary import NotificationKind
 from overnight.services.common import find_row, next_id, validate_participants
@@ -20,7 +20,7 @@ class ChatMessage(State):
 
 class Conversation(State):
     id: Text
-    participants: Annotated[Names, Field(min_length=1)]
+    participants: NonemptyNameSet
     messages: list[ChatMessage] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -51,7 +51,7 @@ class ChatSend(ChatRead):
 
 
 class ChatStart(Parameters):
-    participants: NonemptyNames
+    participants: NonemptyNameSet
     body: Text
 
 

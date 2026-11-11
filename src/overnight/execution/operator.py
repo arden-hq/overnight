@@ -8,7 +8,7 @@ brief through an injected transport. This module performs no I/O: a model transp
 
 import hashlib
 import json
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Protocol
@@ -37,10 +37,13 @@ from overnight.domain.values import JsonObject
 from overnight.domain.vocabulary import ApprovalDecision
 from overnight.execution.adapters import AdapterError, ContractError
 from overnight.execution.usage import NO_CALLS, ProcessUsage
+from overnight.services.operations import ServiceBoundary
 
 type Expects = Literal["reply", "decision"]
 type StepKey = tuple[int, int]
 type Message = dict[str, str]
+type Canonical = Callable[[str, str, JsonObject], JsonObject]
+"""The arguments an operation reads from a request: (service_id, operation, args) -> value."""
 
 
 class OperatorError(AdapterError):
@@ -162,24 +165,56 @@ class Operator(Protocol):
     def provenance(self) -> JsonObject: ...
 
 
-def _matches(step: ScheduledDecision, request: ApprovalRequest) -> bool:
-    return (
-        request.service_id == step.match.service_id
-        and request.operation == step.match.operation
-        and json_equal(request.args, step.match.args)
-    )
+def canonical_arguments(config: Scenario, definitions: Mapping[str, ServiceBoundary]) -> Canonical:
+    """Read arguments through each operation's parameters, so two spellings of one value agree."""
+    kinds = {service.id: service.kind for service in config.services}
+
+    def canonical(service_id: str, operation: str, args: JsonObject) -> JsonObject:
+        spec = definitions[kinds[service_id]].operations.get(operation)
+        if spec is None:
+            raise ValueError(f"unknown operation: {service_id}.{operation}")
+        return spec.canonical_args(args)
+
+    return canonical
 
 
 class ScriptedOperator:
-    """Timed approve/deny steps. Each applies to the oldest open request with exactly its
-    service, operation and arguments; a step with no such request waits for one."""
+    """Timed approve/deny steps. Each applies to the oldest open request for its service and
+    operation whose arguments name the same value as the step's: both are read through the
+    operation's parameters, so defaults, surrounding whitespace and name order do not matter. A
+    step with no such request waits for one."""
 
-    def __init__(self, steps: Iterable[OperatorStep]) -> None:
+    def __init__(self, steps: Iterable[OperatorStep], canonical: Canonical) -> None:
         indexed = [
             (index, step) for index, step in enumerate(steps) if isinstance(step, ScheduledDecision)
         ]
         self.steps = sorted(indexed, key=lambda item: (item[1].at, item[0]))
         self.completed: set[int] = set()
+        self.canonical = canonical
+        # A step naming no single operation (``*``) has no value to compare and matches nothing.
+        self.wanted = {
+            index: self._read(step.match.service_id, step.match.operation, step.match.args)
+            for index, step in indexed
+        }
+        self.asked: dict[str, JsonObject | None] = {}
+
+    def _read(self, service_id: str, operation: str, args: JsonObject) -> JsonObject | None:
+        """Canonical arguments; None when the operation would reject them."""
+        try:
+            return self.canonical(service_id, operation, args)
+        except ValueError:
+            return None
+
+    def _requested(self, request: ApprovalRequest) -> JsonObject | None:
+        if request.id not in self.asked:
+            self.asked[request.id] = self._read(request.service_id, request.operation, request.args)
+        return self.asked[request.id]
+
+    def _matches(self, index: int, step: ScheduledDecision, request: ApprovalRequest) -> bool:
+        if (request.service_id, request.operation) != (step.match.service_id, step.match.operation):
+            return False
+        wanted, requested = self.wanted[index], self._requested(request)
+        return wanted is not None and requested is not None and json_equal(requested, wanted)
 
     def _open(self) -> list[tuple[int, ScheduledDecision]]:
         return [(index, step) for index, step in self.steps if index not in self.completed]
@@ -196,7 +231,12 @@ class ScriptedOperator:
             if step.at > now or (before is not None and (step.at, index) >= before):
                 continue
             request = next(
-                (item for item in open if item.id not in taken and _matches(step, item)), None
+                (
+                    item
+                    for item in open
+                    if item.id not in taken and self._matches(index, step, item)
+                ),
+                None,
             )
             if request is None:
                 continue
@@ -217,8 +257,8 @@ class ScriptedOperator:
         return min(
             (
                 step.at
-                for _, step in self._open()
-                if step.at > now and any(_matches(step, request) for request in open)
+                for index, step in self._open()
+                if step.at > now and any(self._matches(index, step, request) for request in open)
             ),
             default=None,
         )
@@ -226,8 +266,8 @@ class ScriptedOperator:
     def outstanding(self, open: Sequence[ApprovalRequest]) -> list[str]:
         return [
             step.kind
-            for _, step in self._open()
-            if any(_matches(step, request) for request in open)
+            for index, step in self._open()
+            if any(self._matches(index, step, request) for request in open)
         ]
 
     def finish(self) -> None:
@@ -552,13 +592,17 @@ class QaTransport:
         pass
 
 
-def make_operator(config: Scenario, transport: OperatorTransport | None) -> Operator:
+def make_operator(
+    config: Scenario,
+    transport: OperatorTransport | None,
+    definitions: Mapping[str, ServiceBoundary],
+) -> Operator:
     """The single place that picks the operator for a run."""
     persona = config.operator.persona
     if persona is None:
         if transport is not None:
             raise ScenarioError("operator answers need a scenario with an operator persona")
-        return ScriptedOperator(config.operator.steps)
+        return ScriptedOperator(config.operator.steps, canonical_arguments(config, definitions))
     if transport is None:
         raise ScenarioError(
             "this scenario's operator is a persona: pass a model transport or recorded answers"

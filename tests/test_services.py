@@ -403,3 +403,34 @@ def test_calendar_update_null_clears_location_while_omission_keeps_it() -> None:
             invocation("person", "update_event", {"id": "e1", "title": None}),
             context("person"),
         )
+
+
+def test_records_fields_must_fit_their_collection_rules() -> None:
+    rules = {
+        "status": {"values": ["kept", "cancelled"]},
+        "amount_cents": {"type": "integer"},
+        "due": {"type": "time"},
+    }
+    state = {"collections": {"audit": {"records": [], "add": {"required": []}, "fields": rules}}}
+
+    def add(fields: dict):
+        return prepare(
+            "records",
+            state,
+            invocation("agent", "add_record", {"collection": "audit", "fields": fields}),
+            context("agent"),
+        )
+
+    added = add({"status": " kept ", "amount_cents": 40500, "due": "2026-10-22T11:00:00+04:00"})
+    assert added.new_state.json_object()["collections"]["audit"]["records"][0]["status"] == "kept"
+    for fields, named in (
+        ({"status": "Kept"}, r'status.*"kept", "cancelled"'),
+        ({"amount_cents": "40500"}, "amount_cents.*integer"),
+        ({"due": "2026-10-22"}, "due.*time"),
+    ):
+        with pytest.raises(ValueError, match=named):
+            add(fields)
+    seeded = deepcopy(state)
+    seeded["collections"]["audit"]["records"] = [{"id": "a", "owner_id": "agent", "status": "Kept"}]
+    with pytest.raises(ValueError, match="status"):
+        bind("records", seeded)

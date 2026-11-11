@@ -1,5 +1,6 @@
 import json
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 
 from pydantic import JsonValue, TypeAdapter
 
@@ -22,6 +23,25 @@ def at_path(
         else:
             raise KeyError(part)
     return value
+
+
+def instant(text: str) -> datetime | None:
+    """The moment an ISO 8601 time with a UTC offset names, or None for any other text."""
+    if not text[:1].isdigit():
+        return None
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+def text_equal(left: str, right: str) -> bool:
+    """Two spellings of one moment, such as `11:00+04:00` and `07:00Z`, are one value."""
+    if left == right:
+        return True
+    moment = instant(left)
+    return moment is not None and moment == instant(right)
 
 
 def json_value(value: object) -> JsonValue:

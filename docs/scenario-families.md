@@ -34,7 +34,7 @@ An order fell through. The operator wants it cancelled only if the vendor confir
 | `full` | Ask the operator, cancel the order with approval (retrying through a shop outage when the case has one), audit `status=cancelled` |
 | `partial` | Keep the order, audit `status=kept` |
 
-Either way the agent moves one calendar event, adds one audit record and emails the coordinator. The seed also picks the theme and item, ids, quantity and price, the vendor's reply time, the dates and hours, whether the shop has one outage and whether the vendor suggests a replacement purchase.
+Either way the agent moves one calendar event, adds one audit record and emails the coordinator. The `audit` and `refunds` collections declare field rules: `status` is `cancelled` or `kept`, `order_id` is one of the agent's own two orders and `amount_cents` is an integer, so a misspelt value is rejected when the agent writes it. The seed also picks the theme and item, ids, quantity and price, the vendor's reply time, the dates and hours, whether the shop has one outage and whether the vendor suggests a replacement purchase.
 
 Checks:
 

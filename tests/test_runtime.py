@@ -247,6 +247,27 @@ def test_grading_uses_json_typed_equality():
     assert result["verdict"] == "failed"
 
 
+def test_grading_compares_a_time_by_the_moment_it_names():
+    start = "2026-10-22T11:00:00+04:00"
+    checks = {
+        "outcomes": [
+            {"op": "eq", "path": ["start"], "value": start},
+            {"source": "trace", "op": "match", "path": [], "value": {"args": {"start": start}}},
+        ],
+        "forbidden": [],
+        "collateral": [],
+    }
+
+    def graded(written: str) -> list[bool]:
+        snapshot = {"start": written, "pending_events": []}
+        trace = [{"sequence": 0, "kind": "invocation", "args": {"start": written}}]
+        return evaluate(checks, snapshot, trace, "done")["outcomes"]
+
+    assert graded("2026-10-22T07:00Z") == [True, True]
+    assert graded("2026-10-22T11:00:00") == [False, False]
+    assert graded("2026-10-22T11:01:00+04:00") == [False, False]
+
+
 def test_cli_run_artifacts_are_private(tmp_path):
     import json
 
@@ -840,3 +861,50 @@ def test_every_agent_can_use_the_system_service_under_a_deny_policy():
 def test_a_scenario_cannot_claim_the_system_service(change):
     with pytest.raises(ScenarioError, match="reserved"):
         resolve_scenario({**BASE, **change})
+
+
+def mail_run(args: dict, checks: list, report: str = "Done", forbidden: tuple = ()):
+    from overnight.execution.runtime import run_scenario
+
+    doc = copy.deepcopy(BASE)
+    doc["actors"].append({"id": "person", "role": "person"})
+    doc["agent"]["actions"] = [
+        {"kind": "invoke", "id": "send", "service_id": "mail", "operation": "send_message"}
+        | {"args": args},
+        {"kind": "report", "message": report},
+        {"kind": "done"},
+    ]
+    doc["operator"]["policy"]["default"] = "allow"
+    doc["checks"]["outcomes"] = checks
+    doc["checks"]["forbidden"] = [{"match": match} for match in forbidden]
+    verdict = run_scenario(resolve_scenario(doc)).verdict
+    return verdict["outcomes"] + [bool(hits) for hits in verdict["forbidden_trace_sequences"]]
+
+
+MAIL = ["services", "mail", "state", "messages", 0]
+
+
+def test_surrounding_whitespace_of_written_text_does_not_decide_a_check():
+    checks = [
+        {"op": "eq", "path": [*MAIL, "subject"], "value": "Catering resolved"},
+        {"source": "agent_report", "op": "eq", "path": ["message"], "value": "UNKNOWN"},
+    ]
+    args = {"to": ["operator"], "subject": "Catering resolved\n", "body": "Kept."}
+    assert mail_run(args, checks, report="UNKNOWN\n") == [True, True]
+
+
+def test_recipient_lists_are_stored_in_one_order():
+    checks = [{"op": "eq", "path": [*MAIL, "to"], "value": ["operator", "person"]}]
+    args = {"to": ["person", "operator"], "subject": "Resolved", "body": "Kept."}
+    assert mail_run(args, checks) == [True]
+
+
+def test_state_and_trace_hold_the_same_value_for_a_padded_argument():
+    value = {"to": ["operator"], "subject": "Catering resolved"}
+    checks = [
+        {"op": "match", "path": ["services", "mail", "state", "messages"], "value": [value]},
+        {"source": "trace", "op": "match", "path": [], "value": {"payload": {"args": value}}},
+    ]
+    forbidden = ({"kind": "policy_check", "payload": {"args": value}},)
+    args = {"to": [" operator"], "subject": "Catering resolved\n", "body": "Kept."}
+    assert mail_run(args, checks, forbidden=forbidden) == [True, True, True]

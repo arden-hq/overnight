@@ -43,9 +43,23 @@ def _reject_explicit_null(value: object) -> object:
 
 
 type Omittable[T] = Annotated[T | SkipJsonSchema[None], BeforeValidator(_reject_explicit_null)]
-Text = Annotated[str, StringConstraints(min_length=1, pattern=r"\S")]
+# Surrounding whitespace never carries meaning, so text is stored trimmed; inner text is kept.
+Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, pattern=r"\S")]
+Body = Annotated[str, StringConstraints(strip_whitespace=True)]
+"""Message text that may be empty, trimmed like ``Text``."""
 Names = list[Text]
 NonemptyNames = Annotated[Names, Field(min_length=1)]
+
+
+def sort_names(names: list[str] | None) -> list[str] | None:
+    """A set of names (recipients, attendees, viewers, participants) has one stored order."""
+    return None if names is None else sorted(names)
+
+
+# The sort is metadata outside the list type, so the JSON schema stays a plain array of names.
+NameSet = Annotated[Names, AfterValidator(sort_names)]
+NonemptyNameSet = Annotated[NonemptyNames, AfterValidator(sort_names)]
+OmittableNameSet = Annotated[Omittable[Names], AfterValidator(sort_names)]
 
 
 class Contract(BaseModel):
@@ -287,7 +301,8 @@ class InvocationMatch(Contract):
 
 
 class ScheduledDecision(Contract):
-    """A scripted operator's timed decision on the oldest open request with exactly ``match``."""
+    """A scripted operator's timed decision on the oldest open request whose arguments read as
+    the same value as ``match`` once the operation has validated both."""
 
     kind: Literal[ApprovalDecision.APPROVE, ApprovalDecision.DENY]
     at: Nonnegative

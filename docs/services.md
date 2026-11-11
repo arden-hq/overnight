@@ -4,13 +4,19 @@ Each module in `src/overnight/services/` (`mail`, `chat`, `calendar`, `shop`, `r
 
 Every service instance in a scenario has its own `id` and one of the kinds below. Dates are integer simulation seconds, except calendar `start`/`end`, which are ISO 8601 strings with UTC offsets. Generated IDs use the first unused numbered ID in that service (`mail-1`, `order-1`). Seed IDs must be unique.
 
+Values are stored in one spelling, for seeds and writes alike, so a check compares values rather than how they were typed:
+
+- Text (IDs, a mail subject, a calendar title, a mail or chat body) is stored without surrounding whitespace; inner text, line breaks included, is kept. Text that is only whitespace is rejected, except a mail `body`, which may be empty.
+- Name sets are stored sorted: mail `to` and `cc`, calendar `attendees`, chat `participants` and records `visible_to`. `["person", "operator"]` is stored as `["operator", "person"]`.
+- Records fields are free JSON unless a field rule applies (below); their top-level text values are stored without surrounding whitespace.
+
 | Kind | Seed `state` | Operations and arguments |
 | --- | --- | --- |
 | `mail` | `messages: [{id, from, to: [actor ID or address], cc?, subject, body, date, draft?}]` | `list_messages` (`folder?`: inbox/sent/drafts, `query?`); `read_message` (`id`); `send_message` (`to`, `subject`, `body`, `cc?`); `save_draft` (`subject`, `body`, `to?`, `cc?`); `delete_messages` (`ids`) |
 | `chat` | `conversations: [{id, participants: [actor IDs], messages: [{id, from, body, date}]}]` | `list_conversations`; `read_messages` (`conversation_id`); `start_conversation` (`participants`, `body`); `send_message` (`conversation_id`, `body`) |
 | `calendar` | `events: [{id, owner_id, title, start, end, attendees?, location?}]` | `list_events` (`from?`, `to?`); `create_event` (`title`, `start`, `end`, `attendees?`, `location?`); `update_event` (`id`, optional event fields); `delete_event` (`id`) |
 | `shop` | `catalog: [{id, title, price_cents, available?}], orders?: [{id, item_id, buyer_id, quantity, total_cents, status, placed_at}]` | `list_items`; `buy` (`item_id`, `quantity?`); `list_orders`; `cancel_order` (`order_id`) |
-| `records` | `collections: {name: {records: [{id, owner_id, visible_to?, ...fields}], add?: {required?, final?}, update?, delete?}}` | `list_records` (`collection`); `get_record` (`collection`, `id`); `add_record` (`collection`, `fields`, `visible_to?`); `update_record` (`collection`, `id`, `fields`); `delete_record` (`collection`, `id`) |
+| `records` | `collections: {name: {records: [{id, owner_id, visible_to?, ...fields}], add?: {required?, final?}, update?, delete?, fields?: {field: {type?, values?}}}}` | `list_records` (`collection`); `get_record` (`collection`, `id`); `add_record` (`collection`, `fields`, `visible_to?`); `update_record` (`collection`, `id`, `fields`); `delete_record` (`collection`, `id`) |
 
 ## Visibility
 
@@ -21,6 +27,12 @@ Read operations return only rows the actor may see. Broad access to a service ne
 - Calendar: attendees can read; only the owner can change an event.
 - Shop: the catalog is shared; orders belong to their buyer. Seed orders must name an item in that catalog; `available` is the stock after seeded orders. Cancelling an active order restores its quantity once.
 - Records: readable by the owner and explicit `visible_to` actors; only the owner may update or delete. `add.final` is strictly boolean.
+
+### Records field rules
+
+A collection's `fields` map gives a field a rule: `type` is one of `text`, `integer`, `number`, `boolean` or `time` (an ISO 8601 time with a UTC offset), and `values` lists the values the field may hold. `integer` rejects `"40500"`, `40500.5` and booleans; `number` accepts integers and decimals; a `values` entry is compared like a check's `eq`, so a listed time matches every spelling of its moment. Every value in `values` must fit `type` when both are given. A rule cannot name `id`, `owner_id` or `visible_to`.
+
+`add_record` and `update_record` fail when a written field breaks its rule, and the error names the field and what fits, for example `Field status must be one of: "cancelled", "kept"`, so the agent can correct the call. Seed records must fit their collection's rules. Fields without a rule stay free JSON. Rules are world setup: an observation lists a collection's records, not its rules.
 
 Sent mail and chat messages become world state immediately; replies from people are ordinary scripted events. `records` offers bounded collection operations, not a general storage API.
 

@@ -265,6 +265,18 @@ class World:
         )
         return result
 
+    def canonical_args(self, service_id: str, operation: str, args: object) -> object:
+        """The arguments as the operation reads them (trimmed, sorted, defaults filled), so the
+        trace holds the value the service acts on; ``args`` as given when they do not fit it."""
+        session = self._sessions.get(service_id)
+        spec = None if session is None else session.operations.get(operation)
+        if spec is None or not isinstance(args, dict):
+            return args
+        try:
+            return spec.canonical_args(args)
+        except ValueError:
+            return args
+
     def _record_invocation(
         self, invocation: Invocation, args: object, event_id: str | None
     ) -> None:
@@ -273,7 +285,7 @@ class World:
             {
                 "service_id": invocation.service_id,
                 "operation": invocation.operation,
-                "args": args,
+                "args": self.canonical_args(invocation.service_id, invocation.operation, args),
                 "requested_args": invocation.args,
             },
             actor_id=invocation.actor_id,

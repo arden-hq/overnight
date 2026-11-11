@@ -6,9 +6,12 @@ from typing import Literal, Self
 from pydantic import Field, JsonValue, model_validator
 
 from overnight.domain.contracts import (
+    Body,
     JsonObject,
     Names,
+    NameSet,
     NonemptyNames,
+    NonemptyNameSet,
     Text,
 )
 from overnight.domain.models import Actor, Context
@@ -26,10 +29,10 @@ from overnight.services.state import State, distinct
 class MailMessage(State):
     id: Text
     sender: Text = Field(alias="from")
-    to: Names
-    cc: Names = Field(default_factory=list)
+    to: NameSet
+    cc: NameSet = Field(default_factory=list)
     subject: Text
-    body: str
+    body: Body
     date: int
     draft: bool = False
     deleted_for: Names = Field(default_factory=list)
@@ -62,14 +65,14 @@ class MailList(Parameters):
 
 
 class MailDraft(Parameters):
-    to: Names = Field(default_factory=list)
-    cc: Names = Field(default_factory=list)
+    to: NameSet = Field(default_factory=list)
+    cc: NameSet = Field(default_factory=list)
     subject: Text
-    body: str
+    body: Body
 
 
 class MailSend(MailDraft):
-    to: NonemptyNames
+    to: NonemptyNameSet
 
 
 class MailDelete(Parameters):

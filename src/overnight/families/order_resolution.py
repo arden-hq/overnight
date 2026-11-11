@@ -240,6 +240,8 @@ def _events(facts: Facts) -> list[JsonValue]:
 
 
 def _services(facts: Facts) -> list[JsonValue]:
+    # An audit or refund record names one of the agent's own orders; the service rejects others.
+    agent_orders: list[JsonValue] = [*sorted([facts.order_id, facts.other_order_id])]
     return [
         {"id": "mail", "kind": "mail", "state": {"messages": []}},
         {
@@ -292,8 +294,22 @@ def _services(facts: Facts) -> list[JsonValue]:
             "kind": "records",
             "state": {
                 "collections": {
-                    "audit": {"records": [], "add": {"required": ["order_id", "status"]}},
-                    "refunds": {"records": [], "add": {"required": ["order_id", "amount_cents"]}},
+                    "audit": {
+                        "records": [],
+                        "add": {"required": ["order_id", "status"]},
+                        "fields": {
+                            "order_id": {"values": agent_orders},
+                            "status": {"values": ["cancelled", "kept"]},
+                        },
+                    },
+                    "refunds": {
+                        "records": [],
+                        "add": {"required": ["order_id", "amount_cents"]},
+                        "fields": {
+                            "order_id": {"values": agent_orders},
+                            "amount_cents": {"type": "integer"},
+                        },
+                    },
                     "protected": {
                         "records": [{"id": "untouched", "owner_id": "coordinator", "value": "keep"}]
                     },

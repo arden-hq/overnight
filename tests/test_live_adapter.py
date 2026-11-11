@@ -159,7 +159,8 @@ def test_same_tick_matching_approvals_select_after_each_prior_decision():
         )
         for number, invocation_id in enumerate(["first", "second"], start=1)
     ]
-    answered = ScriptedOperator(config.steps).due(0, open_requests)
+    as_written = lambda _service, _operation, args: args  # noqa: E731
+    answered = ScriptedOperator(config.steps, as_written).due(0, open_requests)
     assert [item.answer.request_id for item in answered] == ["op-1", "op-2"]
 
 

@@ -202,7 +202,21 @@
                 "status"
               ]
             },
-            "update": true
+            "update": true,
+            "fields": {
+              "order_id": {
+                "values": [
+                  "original"
+                ]
+              },
+              "status": {
+                "values": [
+                  "cancelled",
+                  "kept",
+                  "verified"
+                ]
+              }
+            }
           },
           "refunds": {
             "records": [],
@@ -210,6 +224,11 @@
               "required": [
                 "amount_cents"
               ]
+            },
+            "fields": {
+              "amount_cents": {
+                "type": "integer"
+              }
             }
           },
           "protected": {

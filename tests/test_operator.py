@@ -514,3 +514,11 @@ def test_the_shared_world_replay_fixture_is_what_its_script_authors(monkeypatch)
     assert ANSWERS.read_text(encoding="utf-8") == "".join(authored_lines()), (
         "regenerate with: uv run scripts/author_operator_answers.py"
     )
+
+
+def test_a_scripted_decision_matches_a_request_by_its_value():
+    request = {**MAIL_ARGS, "cc": [], "subject": f" {MAIL_ARGS['subject']}\n"}
+    action = {**send("s1"), "args": request}
+    result = scripted_mail([{"at": 1, **APPROVE}], [action, {"kind": "wait", "until": 2}, action])
+
+    assert result.final_state["services"]["mail"]["state"]["messages"] != []

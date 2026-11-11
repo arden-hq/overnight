@@ -4,8 +4,9 @@ from typing import Self
 
 from pydantic import Field, model_validator
 
-from overnight.domain.contracts import JsonObject, Names, Omittable, Text
+from overnight.domain.contracts import JsonObject, NameSet, Omittable, OmittableNameSet, Text
 from overnight.domain.models import Actor, Context
+from overnight.domain.values import instant
 from overnight.domain.vocabulary import NotificationKind
 from overnight.services.common import find_row, next_id, validate_participants
 from overnight.services.operations import IdArgument, OperationSpec, Parameters, Service
@@ -13,9 +14,9 @@ from overnight.services.state import State, distinct
 
 
 def event_time(value: str) -> datetime:
-    parsed = datetime.fromisoformat(value)
-    if parsed.tzinfo is None:
-        raise ValueError("event time must include a UTC offset")
+    parsed = instant(value)
+    if parsed is None:
+        raise ValueError("event time must be an ISO 8601 time with a UTC offset")
     return parsed
 
 
@@ -26,7 +27,7 @@ class CalendarEvent(State):
     start: Text
     end: Text
     location: Text | None = None
-    attendees: Names = Field(default_factory=list)
+    attendees: NameSet = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_interval(self) -> Self:
@@ -54,7 +55,7 @@ class CalendarCreate(Parameters):
     start: Text
     end: Text
     location: Omittable[Text] = Field(default_factory=lambda: None)
-    attendees: Names = Field(default_factory=list)
+    attendees: NameSet = Field(default_factory=list)
 
 
 class CalendarUpdate(IdArgument):
@@ -62,7 +63,7 @@ class CalendarUpdate(IdArgument):
     start: Omittable[Text] = Field(default_factory=lambda: None)
     end: Omittable[Text] = Field(default_factory=lambda: None)
     location: Text | None = Field(default_factory=lambda: None)
-    attendees: Omittable[Names] = Field(default_factory=lambda: None)
+    attendees: OmittableNameSet = Field(default_factory=lambda: None)
 
 
 def _event_visible(row: CalendarEvent, actor_id: str) -> bool:

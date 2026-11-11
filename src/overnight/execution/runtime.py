@@ -216,7 +216,7 @@ class Trial:
         self.initial_snapshot = self.world.snapshot_for_evaluator()
         self.policy = ExecutionPolicy(self.config.operator.policy)
         self.schedule = OperatorSchedule(self.config.operator.steps)
-        self.operator = make_operator(self.config, operator_transport)
+        self.operator = make_operator(self.config, operator_transport, scenario.service_definitions)
         self.requests: dict[str, OperatorRequest] = {}
         self.open_approvals: dict[str, ApprovalRequest] = {}
         self.consulted: set[tuple[str, int]] = set()
@@ -490,7 +490,11 @@ class Trial:
                 "revision": self.policy.revision,
                 "service_id": invocation.service_id,
                 "operation": invocation.operation,
-                "args": json_value(invocation.args),
+                "args": json_value(
+                    self.world.canonical_args(
+                        invocation.service_id, invocation.operation, json_object(invocation.args)
+                    )
+                ),
             },
             actor_id=self.actors.agent,
             invocation_id=invocation.id,
@@ -660,7 +664,8 @@ class Trial:
                 self.invoke_lane(lane, action)
             case ReportAction():
                 before = len(self.world.trace)
-                self.record_report(lane, action.message)
+                # Surrounding whitespace of a report never decides a check, so it is stored trimmed.
+                self.record_report(lane, action.message.strip())
                 self.consult(
                     ReportRequest(
                         kind="report",
