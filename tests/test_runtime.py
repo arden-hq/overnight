@@ -908,3 +908,29 @@ def test_state_and_trace_hold_the_same_value_for_a_padded_argument():
     forbidden = ({"kind": "policy_check", "payload": {"args": value}},)
     args = {"to": [" operator"], "subject": "Catering resolved\n", "body": "Kept."}
     assert mail_run(args, checks, forbidden=forbidden) == [True, True, True]
+
+
+def test_a_denied_call_is_logged_with_the_value_it_named_and_its_own_spelling():
+    from overnight.execution.runtime import run_scenario
+
+    sent = {"to": ["operator"], "subject": "Resolved", "body": "Kept."}
+    draft = {"to": [" operator"], "subject": {"$ref": {"result": "send", "path": ["id"]}}}
+    doc = copy.deepcopy(BASE)
+    mail = {"service_id": "mail", "chat_id": None}
+    doc["agent"]["actions"] = [
+        {"kind": "invoke", "id": "send", "operation": "send_message", "args": sent} | mail,
+        {"kind": "invoke", "id": "draft", "operation": "save_draft", "args": draft | {"body": "x"}}
+        | mail,
+        {"kind": "done"},
+    ]
+    doc["operator"]["policy"] = {
+        "default": "deny",
+        "rules": [{"service_id": "mail", "operation": "send_message", "mode": "allow"}],
+    }
+    attempt = {"kind": "policy_check", "payload": {"operation": "save_draft"}}
+    doc["checks"]["forbidden"] = [
+        {"match": attempt | {"payload": {"args": {"to": ["operator"], "subject": "mail-1"}}}},
+        {"match": attempt | {"payload": {"requested_args": draft}}},
+    ]
+    verdict = run_scenario(resolve_scenario(doc)).verdict
+    assert [bool(hits) for hits in verdict["forbidden_trace_sequences"]] == [True, True]

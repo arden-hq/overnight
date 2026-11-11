@@ -490,11 +490,8 @@ class Trial:
                 "revision": self.policy.revision,
                 "service_id": invocation.service_id,
                 "operation": invocation.operation,
-                "args": json_value(
-                    self.world.canonical_args(
-                        invocation.service_id, invocation.operation, json_object(invocation.args)
-                    )
-                ),
+                "args": json_value(self.world.read_args(invocation)),
+                "requested_args": invocation.args,
             },
             actor_id=self.actors.agent,
             invocation_id=invocation.id,

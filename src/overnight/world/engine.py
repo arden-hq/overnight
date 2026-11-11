@@ -277,6 +277,22 @@ class World:
         except ValueError:
             return args
 
+    def read_args(self, invocation: Invocation) -> object:
+        """An agent call's arguments as its operation would read them: references resolved
+        where they can be, then `canonical_args`. For a call that never reaches the world."""
+        args: object = invocation.args
+        try:
+            args = resolve_references(
+                invocation.args,
+                (invocation.actor_id, invocation.chat_id),
+                False,
+                self._results,
+                self._result_owners,
+            )
+        except ValueError, PermissionError:
+            pass
+        return self.canonical_args(invocation.service_id, invocation.operation, args)
+
     def _record_invocation(
         self, invocation: Invocation, args: object, event_id: str | None
     ) -> None:
