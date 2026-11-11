@@ -87,8 +87,10 @@ class HarnessAdapter(PersistentCommandAdapter):
         provenance_path,
         required: HarnessRequirements,
         container: AgentContainer | None = None,
+        capture: bool = False,
+        policy_port: int | None = None,
     ):
-        super().__init__(command, timeout_seconds, provenance_path, container)
+        super().__init__(command, timeout_seconds, provenance_path, container, capture, policy_port)
         self.required = required
         self.capabilities: Capabilities | None = None
         self.status = HarnessStatus(pending=False)
@@ -107,13 +109,18 @@ class HarnessAdapter(PersistentCommandAdapter):
 
     def _handshake(self) -> Capabilities:
         if self.capabilities is None:
-            reply = super().respond(
-                {
-                    "kind": "hello",
-                    "version": 1,
-                    "required": self.required.model_dump(mode="json"),
-                }
-            )
+            try:
+                reply = super().respond(
+                    {
+                        "kind": "hello",
+                        "version": 1,
+                        "required": self.required.model_dump(mode="json"),
+                    }
+                )
+            except AgentBehaviorError as error:
+                # Nothing the agent under evaluation decides runs before `ready`: a harness that
+                # ends or stalls here is a connector that could not start, not the agent's fault.
+                raise AdapterError(f"harness ended before it was ready: {error}") from error
             try:
                 ready = Ready.model_validate(reply)
                 ready.capabilities.require(self.required)

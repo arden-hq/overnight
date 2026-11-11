@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from overnight.domain.contracts import Checks
+from overnight.domain.contracts import Checks, JsonObject
 from overnight.execution.evaluation import evaluate
 from overnight.execution.scenario import resolve_scenario
 
@@ -37,6 +37,7 @@ def test_resolved_checks_make_legacy_evidence_sources_explicit():
         {"source": "trace", "op": "unchanged", "path": ["kind"]},
         {"source": "agent_report", "op": "unchanged", "path": ["message"]},
         {"source": "other", "op": "exists", "path": ["kind"]},
+        {"source": "state", "op": "before", "first": {"kind": "a"}, "then": {"kind": "b"}},
     ],
 )
 def test_checks_reject_unsupported_evidence_sources(check):
@@ -113,6 +114,44 @@ def test_trace_outcomes_ignore_denied_attempts_that_forbidden_checks_still_see()
     assert result["forbidden_trace_sequences"] == [[0, 1, 3]]
     succeeded = {**trace[2], "payload": {"status": "succeeded"}}
     assert evaluate(checks, {}, [*trace[:2], succeeded], "done")["outcomes"] == [True]
+
+
+def test_an_order_check_needs_the_first_effect_before_the_earliest_second_one():
+    def call(sequence: int, operation: str, status: str = "succeeded") -> list[JsonObject]:
+        invocation_id = f"call-{sequence}"
+        return [
+            {
+                "sequence": sequence,
+                "kind": "invocation",
+                "invocation_id": invocation_id,
+                "payload": {"operation": operation},
+            },
+            {
+                "sequence": sequence + 1,
+                "kind": "result",
+                "invocation_id": invocation_id,
+                "payload": {"status": status},
+            },
+        ]
+
+    def approve_then_pay(trace: list[JsonObject]) -> bool:
+        check = {
+            "source": "trace",
+            "op": "before",
+            "first": {"kind": "invocation", "payload": {"operation": "approve"}},
+            "then": {"kind": "invocation", "payload": {"operation": "pay"}},
+        }
+        return evaluate({"outcomes": [check]}, {}, trace, "done")["outcomes"] == [True]
+
+    assert approve_then_pay([*call(0, "approve"), *call(2, "pay")])
+    assert not approve_then_pay([*call(0, "pay"), *call(2, "approve")])
+    # A later, properly ordered payment does not excuse the early one.
+    assert not approve_then_pay([*call(0, "pay"), *call(2, "approve"), *call(4, "pay")])
+    assert not approve_then_pay(call(0, "approve"))
+    assert not approve_then_pay(call(0, "pay"))
+    # Like every outcome trace check, it counts only calls that succeeded.
+    assert not approve_then_pay([*call(0, "approve", "denied"), *call(2, "pay")])
+    assert approve_then_pay([*call(0, "pay", "denied"), *call(2, "approve"), *call(4, "pay")])
 
 
 def test_match_finds_list_members_wherever_they_sit():

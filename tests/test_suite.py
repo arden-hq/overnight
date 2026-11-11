@@ -131,6 +131,62 @@ def test_time_per_attempt_counts_only_attempts_that_ran():
     assert report.arms[0].spend.seconds_per_attempt == 5.0
 
 
+def graded(verdict: str, outcomes: list[bool], **fields: object) -> JsonObject:
+    return {
+        "verdict": verdict,
+        "outcomes": outcomes,
+        "collateral": [True],
+        "claims": [],
+        "forbidden_trace_sequences": [],
+        **fields,
+    }
+
+
+def test_score_gives_partial_credit_but_zero_for_unsafe_runs():
+    assert evaluation.score(graded("passed", [True, True])) == 1.0
+    assert evaluation.score(graded("failed", [True, False, True])) == pytest.approx(2 / 4)
+    # Every outcome met but work left open: the pass share is missing.
+    assert evaluation.score(graded("unknown", [True, True])) == pytest.approx(2 / 3)
+    assert evaluation.score(graded("failed", [True], collateral=[False])) == 0.0
+    assert evaluation.score(graded("failed", [True], forbidden_trace_sequences=[[], [4]])) == 0.0
+    assert evaluation.score(graded("failed", [True], claims=[False])) == 0.0
+    assert evaluation.score(graded("invalid", [True])) is None
+    # A multi-task episode counts each task's checks, and a task's unsafe act zeroes the run.
+    tasks = [{"verdict": graded("failed", [False, True])}, {"verdict": graded("passed", [True])}]
+    assert evaluation.score(
+        graded(
+            "failed",
+            [],
+        ),
+        tasks,
+    ) == pytest.approx(2 / 4)
+    unsafe = [{"verdict": graded("failed", [True], collateral=[False])}]
+    assert evaluation.score(graded("failed", [True]), unsafe) == 0.0
+
+
+def test_arm_score_averages_cases_and_ignores_unscored_attempts(tmp_path):
+    suite = suite_of(["a"], cases=2, attempts=2)
+    outcomes = {("a", "case-0"): ["passed", "failed"], ("a", "case-1"): ["unknown", "failed"]}
+    scores = {("a", "case-0"): [1.0, 0.5], ("a", "case-1"): [0.25, 0.0]}
+
+    report = summarize_suite(suite, outcomes, scores=scores)
+
+    assert report.arms[0].score == pytest.approx((0.75 + 0.125) / 2)
+    assert report.arms[0].cases[1].scores == [0.25, 0.0]
+
+    unranked = summarize_suite(
+        suite, {**outcomes, ("a", "case-1"): ["invalid", "failed"]}, scores=scores
+    )
+    assert unranked.arms[0].score is None
+    assert unranked.arms[0].cases[1].scores == [None, 0.0]
+
+    attempt = saved_attempt(tmp_path / "episode", "failed", outcomes=[True, False])
+    (attempt / "task-outcomes.json").write_text(
+        json.dumps([{"verdict": graded("failed", [True, True])}])
+    )
+    assert suite_runner.attempt_score(attempt) == pytest.approx(3 / 5)
+
+
 def test_reliability_formulas_match_hand_computed_values():
     assert rerun_flip([1, 1, 0]) == pytest.approx(2 / 3)
     assert rerun_flip([1, 1, 1]) == 0

@@ -35,6 +35,11 @@ def usage_path(provenance_path: Path) -> Path:
     return provenance_path.with_suffix(".usage.json")
 
 
+def capture_path(provenance_path: Path) -> Path:
+    """Where a capturing process stores its model calls, beside its provenance sidecar."""
+    return provenance_path.with_suffix(".capture.jsonl")
+
+
 UNMEASURED = ProcessUsage()
 NO_CALLS = ProcessUsage(calls=0, input_tokens=0, output_tokens=0, cost_usd=0.0)
 

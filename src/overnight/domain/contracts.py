@@ -409,7 +409,16 @@ class PresenceCheck(CheckLabel):
         return self
 
 
-type Check = Annotated[EqualsCheck | PresenceCheck, Field(discriminator="op")]
+class OrderCheck(CheckLabel):
+    """The first trace entry matching ``then`` comes after an entry matching ``first``."""
+
+    source: Literal["trace"] = "trace"
+    op: Literal["before"]
+    first: Annotated[JsonObject, Field(min_length=1)]
+    then: Annotated[JsonObject, Field(min_length=1)]
+
+
+type Check = Annotated[EqualsCheck | PresenceCheck | OrderCheck, Field(discriminator="op")]
 
 
 class ForbiddenCheck(CheckLabel):

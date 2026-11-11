@@ -13,9 +13,11 @@
 | `verdict.json` | Verdict, check results, pending work and any `failure`. Written last, so its presence marks complete evidence |
 | `task-outcomes.json` | Per-task outcomes for an episode |
 | `provenance.json` | Code, seed, adapter identity and the operator for this run |
-| `agent/` | The agent process's sidecars (`connector-N-generation-G`). For a [contained](harness-integration.md#isolation) agent, everything it wrote in its agent folder, including native files and `egress.log`; files it left that could not be copied are listed in `copy-errors.txt` |
+| `agent/` | The agent process's sidecars (`connector-N-generation-G`) and its own folder of the same name. For a [contained](harness-integration.md#isolation) agent, that folder holds everything it wrote in its agent folder, including native files and `egress.log`; files it left that could not be copied are listed in `copy-errors.txt` |
 
 The trace and resolved scenario are privileged: they may contain private simulation data and evaluation criteria. The operator's requests and answers are in the trace: `operator_request` (what was asked), `operator_answer` (the answer, and as evidence the exact prompts, their digests, the raw model text, settings and usage), `operator_failure` (a request the operator could not answer, with the calls it made) and `operator_message` with the `request_id` it answers. The persona's brief appears only in that evidence. Harness connectors write their native evidence (for example `arden-native.jsonl` or `native/`) beside these files; it is not merged into the world trace.
+
+The runner gives each agent process a fresh private folder of its own and names it in `OVERNIGHT_AGENT_DIRECTORY`: `agent/connector-N-generation-G/` for a host process, `/overnight/agent` (kept as that folder) for a contained one. No two processes or runs share it. The shared ACP host and Feather resolve a relative `evidence` path inside it, so one agent document can run in many episodes, suite attempts or rollouts without two of them writing to one folder. An absolute `evidence` path is used as given, and an ACP connector refuses one that already exists. A `run_scenario` caller that passes no agent folder gets them in a temporary directory, removed after the run.
 
 ## Provenance
 

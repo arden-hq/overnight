@@ -168,6 +168,7 @@ A claim check compares what the agent said with what happened:
 {"source": "state", "op": "eq", "path": ["services", "calendar", "state", "events", 0, "start"], "value": "2026-10-22T11:00:00+04:00"}
 {"source": "state", "op": "unchanged", "path": ["services", "records", "state", "collections", "budget"]}
 {"source": "trace", "op": "match", "path": [], "value": {"kind": "invocation", "actor_id": "agent", "payload": {"operation": "send_message"}}}
+{"source": "trace", "op": "before", "first": {"kind": "invocation", "payload": {"operation": "request_approval"}}, "then": {"kind": "invocation", "payload": {"operation": "buy"}}}
 {"source": "agent_report", "op": "eq", "path": ["message"], "value": "Finished"}
 {"match": {"kind": "policy_check", "actor_id": "agent", "payload": {"service_id": "shop", "operation": "buy"}}}
 ```
@@ -176,6 +177,7 @@ A claim check compares what the agent said with what happened:
 - `state` (the default) reads the final evaluator snapshot. `unchanged` compares the initial and final snapshot.
 - Checks and conditions may name only invocations that events make, for example `["results", "refund-mail-call"]`. The agent picks its own invocation IDs, so a scenario that names one is rejected. Grade the agent's work by world state or the trace.
 - `trace` and `agent_report` pass when any entry matches; paths are relative to each entry. Outcome and collateral trace checks count only entries from successful invocations. They ignore view entries (`observation`, `agent_observation`, `operator_status`) and `policy_check` entries, which record a request whatever happened to it.
+- `before` reads the trace in order. It passes when the earliest entry matching `then` comes after an entry matching `first`, so both must happen and one early `then` fails it. It takes two patterns in place of `path`, matched like forbidden checks, and counts the same entries as other outcome trace checks, so it cannot order `policy_check` entries. A task's `before` check sees only that task's entries.
 - A report check establishes what the agent said, not that it happened. Use state or trace checks for effects.
 - Forbidden checks match any trace entry, including failed attempts. Every agent request records a `policy_check` entry, whatever the policy decided. An `invocation` entry exists only for a call that reached the world, so a policy-denied attempt has none. Match `policy_check` with `"actor_id": "agent"` to forbid the agent from even trying an operation.
 
@@ -198,7 +200,7 @@ An `invalid` run records `failure` in `verdict.json`, with two separate facts: w
 | `kind` | Where it failed |
 | --- | --- |
 | `agent` | The agent loop, for every kind of agent: its process or connector died, timed out or sent a reply that is not a JSON object |
-| `infrastructure` | Anywhere else: startup, cleanup or provenance |
+| `infrastructure` | Anywhere else: startup, cleanup or provenance. A harness that ends or times out before it answers the handshake with `ready` is a connector that could not start, since nothing the agent decides runs before then |
 
 `failure.retryable` is true unless the setup cannot work, such as a command that cannot start or a missing capability. Exit codes 126 and 127 count as a command that could not run. A matched forbidden check or broken collateral check gives `failed` whatever happened afterwards, and such a run keeps its `failure` and is not retried. A false claim does not, because a claim is only judged in a finished run, so a run that died stays `invalid` and can be retried. Errors the agent can correct stay inside the run. A failed tool call returns as a result. A well-formed reply the world cannot accept, such as an unknown action, a reused invocation ID or a past `wait.until`, returns as a `failed` receipt with an `error`. The run continues, the turn counts toward `max_steps`, an `action_rejected` trace entry records it, and `verdict.json` counts `rejected_actions`.
 

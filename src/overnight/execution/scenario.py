@@ -19,6 +19,7 @@ from overnight.domain.contracts import (
     NegatedCondition,
     OperatorMessage,
     OperatorPolicy,
+    OrderCheck,
     Overrides,
     ResultEquals,
     ResultExists,
@@ -129,6 +130,10 @@ def _referenced_results(value: object) -> Iterator[str]:
 
 
 def _check_ids(check: Check) -> Iterator[str]:
+    if isinstance(check, OrderCheck):
+        yield from _named_ids(check.first)
+        yield from _named_ids(check.then)
+        return
     expected = check.value if isinstance(check, EqualsCheck) else None
     if check.source == "state" and check.path[:1] == ["results"]:
         if len(check.path) > 1:

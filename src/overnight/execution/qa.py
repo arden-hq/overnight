@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal
 
@@ -52,6 +53,18 @@ class ProbeResult(QaModel):
     rejections: int = 0
     unproven: bool = False
     note: str | None = None
+
+
+class AuthoredProbe(QaModel):
+    """A wrong agent written for one scenario, with the operator answers of its recorded run."""
+
+    name: str
+    agent: JsonObject
+    operator_answers: list[JsonObject] = []
+
+
+class ProbeFile(QaModel):
+    probes: list[AuthoredProbe]
 
 
 class ScenarioQa(QaModel):
@@ -167,15 +180,22 @@ def _oracle(
     )
 
 
-def _sham(name: str, result: RunResult, must_be_rejected: bool) -> ProbeResult:
+def _sham(
+    name: str, result: RunResult, must_be_rejected: bool, *, each_task: bool = True
+) -> ProbeResult:
+    """Grade a probe that must not pass. A sham does no work, so with ``each_task`` every task
+    with outcomes must reject it on its own; an authored probe may do some tasks right, so its
+    run needs only one rejection."""
     verdict = str(result.verdict["verdict"])
     tasks = _task_verdicts(result)
     rejections = sum(_rejections(item) for item in (result.verdict, *tasks))
-    unproven = rejections == 0 or any(item["outcomes"] and _rejections(item) == 0 for item in tasks)
+    unproven = rejections == 0 or (
+        each_task and any(item["outcomes"] and _rejections(item) == 0 for item in tasks)
+    )
     note = None
     if verdict == Verdict.PASSED:
         note = "passed without the work"
-    elif verdict == Verdict.INVALID:
+    elif verdict == Verdict.INVALID or result.status == RunStatus.INVALID:
         note = "the probe could not run"
     elif (
         must_be_rejected
@@ -184,7 +204,11 @@ def _sham(name: str, result: RunResult, must_be_rejected: bool) -> ProbeResult:
     ):
         note = "ran out of steps before the world finished"
     elif must_be_rejected and unproven:
-        note = "its outcomes held with no agent work, in the run or in one of its tasks"
+        note = (
+            "its outcomes held with no agent work, in the run or in one of its tasks"
+            if each_task
+            else "no check rejected it"
+        )
     return ProbeResult(
         probe=name, verdict=verdict, ok=note is None, rejections=rejections, note=note
     )
@@ -198,6 +222,7 @@ def check_scenario(
     *,
     allow_command: bool = False,
     operator_answers: Path | None = None,
+    authored: Sequence[AuthoredProbe] = (),
 ) -> ScenarioQa:
     probes: list[ProbeResult] = []
     for name, agent, must_be_rejected in SHAM_AGENTS:
@@ -208,6 +233,14 @@ def check_scenario(
         for label, end in _ends(scenario, overrides, variation):
             result = _run_waiter(scenario, overrides, variation, agent, end)
             probes.append(_sham(label, result, must_be_rejected))
+    for probe in authored:
+        operator = (
+            RecordedTransport.from_entries(probe.operator_answers)
+            if _has_persona(scenario)
+            else None
+        )
+        result = _run(scenario, overrides, variation, probe.agent, operator)
+        probes.append(_sham(probe.name, result, True, each_task=False))
     oracle = _oracle(scenario, overrides, variation, allow_command, operator_answers)
     if oracle is not None:
         probes.insert(0, oracle)
@@ -231,6 +264,11 @@ def check_suite(path: Path, *, allow_command: bool = False) -> list[ScenarioQa]:
             else None
         )
         overrides = load_json(root / case.overrides) if case.overrides is not None else None
+        authored = (
+            ProbeFile.model_validate(load_json(root / case.probes)).probes
+            if case.probes is not None
+            else []
+        )
         reports.append(
             check_scenario(
                 case.id,
@@ -238,6 +276,10 @@ def check_suite(path: Path, *, allow_command: bool = False) -> list[ScenarioQa]:
                 overrides,
                 variation,
                 allow_command=allow_command,
+                operator_answers=root / case.operator_answers
+                if case.operator_answers is not None
+                else None,
+                authored=authored,
             )
         )
     return reports

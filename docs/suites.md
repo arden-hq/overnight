@@ -34,7 +34,9 @@ The oracle is a fixed script written for the base scenario. When it fails a case
 
 For a scenario whose operator is a persona, the sham probes get an operator that replies to nothing and denies every approval, and no model runs. Its oracle needs recorded answers (`overnight qa --operator-answers TRACE`); without them it is reported `no_oracle`.
 
-Exit code 0 means every probe held, 1 means a defect, 2 means nothing is wrong but no oracle proved the scenario solvable, 3 means a scenario, suite or variation file could not be read or is invalid, and 64 means a usage error. Only a scripted oracle runs by default. `--allow-command` also runs a local command agent as the oracle, and it may call a model. A harness is never run. `suite run` does not enforce QA. These probes catch shortcuts in general; they do not replace a scenario-specific cheating attempt.
+Exit code 0 means every probe held, 1 means a defect, 2 means nothing is wrong but no oracle proved the scenario solvable, 3 means a scenario, suite, variation, probes or operator answers file could not be read or is invalid, and 64 means a usage error. Only a scripted oracle runs by default. `--allow-command` also runs a local command agent as the oracle, and it may call a model. A harness is never run. `suite run` does not enforce QA. These probes catch shortcuts in general; they do not replace a scenario-specific cheating attempt.
+
+`overnight qa --probes FILE` adds such attempts, and `suite qa` reads the same files from a case's `operator_answers` and `probes`. The file holds `{"probes": [{"name", "agent", "operator_answers"}]}`: each `agent` replaces the scenario's agent for one run, and for a persona scenario its `operator_answers` are the recorded `operator_answer` payloads of that run, so the operator may approve what a careless person would. Each probe must be rejected by at least one check and must not pass. A probe whose run is invalid, for example because its recorded answers no longer fit, is a defect. In an episode with several tasks, an authored probe may do some tasks right; one rejection anywhere in its run is enough. [Scenario families](scenario-families.md) write this file for every case.
 
 ## Format
 
@@ -43,13 +45,23 @@ Exit code 0 means every probe held, 1 means a defect, 2 means nothing is wrong b
 | `id` | Suite identity |
 | `attempts` | Attempts per arm and case, 1 to 100 |
 | `arms` | `id` and an optional `agent` that replaces the case's agent; it keeps the case's `context` unless it sets its own. Without `agent` the case keeps its authored agent |
-| `cases` | `id`, `scenario`, optional `overrides` and `variation`; paths are relative to the suite file |
+| `cases` | `id`, `scenario`, optional `overrides` and `variation`, and optional `operator_answers` and `probes` that only `suite qa` reads (as `overnight qa --operator-answers` and `--probes`) and `suite validate` checks are readable; paths are relative to the suite file |
 | `retries` | Fresh runs allowed per attempt after `agent_failed`, `invalid` or `error`, 0 to 5, default 2 |
 | `operator_model` | Optional [operator model](scenario-format.md#persona) that replaces every persona case's own, so the arms and the operator share one provider |
 | `resamples` | Bootstrap resamples, default 5000 |
 | `bootstrap_seed` | Bootstrap seed, default 0 |
 
 Every attempt of a case uses the same world seed, so attempts measure the agent's own variation. To vary the world, add cases with different variations.
+
+### Fixed operator for training
+
+For training, point `operator_model` at a small model you serve yourself, on an OpenAI-compatible endpoint. The model then stays the same while the policy changes. A local URL works over plain HTTP. The key variable must be set, but a local engine accepts any key:
+
+```json
+"operator_model": {"provider": {"base_url": "http://127.0.0.1:8001/v1", "api_key_env": "LOCAL_OPERATOR_KEY"}, "model": "local/operator", "input_usd_per_million": 0, "output_usd_per_million": 0}
+```
+
+Recorded operator answers do not work for training. They replay one agent's path, and a policy that changes its path makes the replay fail. Each run's `provenance.json` records the operator under `operator`: `configured_model`, `model` as the endpoint reported it, and `settings` with the `base_url`. A contained agent cannot reach a local endpoint, but the operator runs in the runner on the host, so it can. The [rollout worker](rollouts.md) takes the same `operator_model` per request.
 
 ## Evidence
 
@@ -86,6 +98,8 @@ A retry is a fresh run from the frozen inputs, and earlier tries stay on disk. O
 An arm with an attempt still unscored after its retries gets no statistics and is not ranked, only its counts and per-case outcomes. Dropping that attempt alone could hide a failure.
 
 A case scores the mean of its attempts. An arm's `mean` weights cases equally.
+
+Each scored attempt also gets a `score` from 0 to 1, the partial credit behind its verdict. A pass scores 1. A forbidden action, a collateral change or a false claim scores 0. Otherwise each met outcome check earns one share of `outcomes + 1`; the last share is the pass itself, so a run that met every outcome but left work open stays below 1. A multi-task episode counts every task's checks. An attempt that is not scored has a null score. So has one whose task grades cannot be read, and its arm then reports no `score` rather than a guessed one. An arm's `score` is the mean over cases of each case's mean attempt score; it does not change `mean`, the ranking or the intervals.
 
 | Field | Meaning |
 | --- | --- |

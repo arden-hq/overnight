@@ -123,6 +123,8 @@ Configuration:
 }
 ```
 
+A relative `evidence` path is resolved inside the folder the runner gives this process (`OVERNIGHT_AGENT_DIRECTORY`, fresh for every process of every run; [run evidence](evidence.md)), and outside a run against the working directory. Use a relative path, such as `"native"`, in an agent document that runs more than once, as a suite's attempts and a trainer's rollouts do. An absolute path is used as given and must not exist yet.
+
 Run with `python -m overnight.adapters.acp --config adapter.json`. Use that command in an existing `agent.kind: harness` scenario. Factory code is trusted local code; the import path is not a sandbox boundary. Stdout is protocol-only; diagnostics go to private artifacts/stderr. No core registry edit is required.
 
 ## Run the Pi example
@@ -172,7 +174,7 @@ The probe checks retained conversation without replaying an earlier codeword, tw
 
 The complex catering case needs waiting for a vendor who replies later. Every connector can wait through the world's `system` tools, and an idle harness gets a new turn when the vendor's reply arrives as a notification, so the case needs no native scheduler. Arden's native scheduler, Feather's connector-owned wake and Prime's patched native evaluation runtime remain alternative implementations of the native status/clock contract, not interchangeable native features.
 
-Pi's price inputs are caller-verified route rates. Aggregate request, byte and output limits must fit `max_cost_usd` (at most $5), and the extension exits before an excess request. Native retry is disabled. This is a conservative request bound, not provider billing. A different model requires verified prices.
+Pi's price inputs are caller-verified route rates. Aggregate request, byte and output limits must fit `max_cost_usd` (at most $5). Pi reaches the provider only through the connector's loopback relay, which holds the key and refuses an excess request before paying; the extension then stops the Pi process. Native retry is disabled. This is a conservative request bound, not provider billing. A different model requires verified prices.
 
 ## Files
 

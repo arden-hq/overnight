@@ -60,6 +60,12 @@ def test_checks_join_verdict_by_layer_index_with_labels_and_evidence():
                 "value": 1,
             },
             {"op": "eq", "path": ["results", "call", "status"], "value": "succeeded"},
+            {
+                "source": "trace",
+                "op": "before",
+                "first": {"kind": "invocation"},
+                "then": {"kind": "result"},
+            },
         ],
         "collateral": [{"op": "unchanged", "path": ["services", "mail", "state"]}],
         "forbidden": [{"label": "Never buys", "match": {"kind": "invocation"}}],
@@ -73,7 +79,7 @@ def test_checks_join_verdict_by_layer_index_with_labels_and_evidence():
     ]
     verdict: JsonObject = {
         "verdict": "failed",
-        "outcomes": [True, False],
+        "outcomes": [True, False, True],
         "collateral": [True],
         "forbidden_trace_sequences": [[0]],
     }
@@ -85,6 +91,7 @@ def test_checks_join_verdict_by_layer_index_with_labels_and_evidence():
     assert rows == [
         ("outcome", 0, "Order cancelled", True, [4]),
         ("outcome", 1, 'results.call.status = "succeeded"', False, [1, 2, 3]),
+        ("outcome", 2, "trace: kind=invocation before kind=result", True, [1, 3]),
         ("collateral", 0, "services.mail.state unchanged", True, []),
         ("forbidden", 0, "Never buys", False, [1]),
     ]

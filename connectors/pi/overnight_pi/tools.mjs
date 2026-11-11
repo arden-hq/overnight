@@ -1,4 +1,3 @@
-import { appendFileSync, statSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -7,20 +6,8 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 export default async function (pi) {
   const config = JSON.parse(await readFile(process.env.OVERNIGHT_PI_TOOLS, "utf8"));
   const clients = [];
-  // pi-acp starts one pi process per ACP session (new, restored or loaded), so the budget is a
-  // byte-per-request file shared by every process of this run rather than a process counter.
-  const countRequest = () => {
-    appendFileSync(config.request_counter, "x");
-    return statSync(config.request_counter).size;
-  };
-  pi.on("before_provider_request", (event) => {
-    const requests = countRequest();
-    if (requests > Number(process.env.OVERNIGHT_PI_MAX_REQUESTS) ||
-        Buffer.byteLength(JSON.stringify(event.payload)) > Number(process.env.OVERNIGHT_PI_MAX_BYTES)) {
-      process.stderr.write("Overnight model request limit reached\n");
-      process.exit(1);
-    }
-  });
+  // The connector's relay bounds every pi process of this run and refuses a request past its
+  // limits with an HTTP error; the process stops on any provider error rather than retrying.
   pi.on("after_provider_response", (event) => {
     if (event.status >= 400) {
       process.stderr.write(`Overnight provider response: HTTP ${event.status}\n`);

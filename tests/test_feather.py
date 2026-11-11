@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 from collections import deque
 
 import httpx
@@ -11,10 +12,18 @@ from feather_harness import ModelSettings, SystemMessage, UserMessage
 from feather_harness.core.messages import AssistantMessage, ToolCall
 from feather_harness.core.runner import RunResult, TraceSegment
 from openai import AsyncOpenAI
+from overnight_feather.host import relayed_client
 from overnight_feather.provider import Budget, IdentifiedModel
 from overnight_feather.session import Chat, Connector, Observe
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Route
 
 from overnight.adapters.bridge import ToolBridge
+from overnight.adapters.http import serve_http
+from overnight.adapters.provider import CompatibleProvider
+from overnight.adapters.provider_relay import RequestBudget
 
 
 def completion(calls=(), content=None):
@@ -219,6 +228,46 @@ def test_budget_refuses_unaffordable_call_before_provider():
     budget = Budget(limit=0.001)
     with pytest.raises(RuntimeError):
         budget.check([UserMessage(content="x" * 1000)], (), ModelSettings(max_tokens=4096))
+
+
+def test_model_client_reaches_the_provider_only_through_the_relay(monkeypatch):
+    seen = []
+
+    async def completions(request: Request):
+        seen.append(request.headers.get("authorization"))
+        return JSONResponse(completion(content="done"))
+
+    upstream = Starlette(routes=[Route("/v1/chat/completions", completions, methods=["POST"])])
+    monkeypatch.setenv("EXAMPLE_API_KEY", "private-test-key")
+    records = []
+    budget = RequestBudget(input_usd_per_million=0.2, output_usd_per_million=0.75)
+
+    async def run():
+        async with serve_http(upstream) as url:
+            provider = CompatibleProvider(base_url=url + "/v1", api_key_env="EXAMPLE_API_KEY")
+            async with relayed_client(provider, "example/model", budget, records.append) as client:
+                assert client.api_key != "private-test-key"
+                assert not str(client.base_url).startswith(url)
+                assert "EXAMPLE_API_KEY" not in os.environ
+                model = IdentifiedModel(
+                    calls=deque(),
+                    budget=Budget(limit=1),
+                    record=lambda _value: None,
+                    client=client,
+                    model="example/model",
+                )
+                return await model.complete(
+                    [UserMessage(content="hi")], settings=ModelSettings(max_tokens=100)
+                )
+
+    result = asyncio.run(run())
+
+    assert result.assistant.content == "done"
+    assert seen == ["Bearer private-test-key"]
+    assert records == [
+        {"kind": "provider_request", "request": 1, "status": 200},
+        {"kind": "provider_closed", "requests": 1},
+    ]
 
 
 def test_native_tools_do_not_consume_world_operation_identity():

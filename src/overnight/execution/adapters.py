@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -32,6 +33,8 @@ from overnight.domain.contracts import (
     action_contract,
 )
 from overnight.domain.transport import (
+    AGENT_DIRECTORY_VARIABLE,
+    CAPTURE_PATH_VARIABLE,
     COMMAND_TIMEOUT_SECONDS,
     GRACEFUL_EXIT_SECONDS,
     PERSISTENT_TIMEOUT_SECONDS,
@@ -42,6 +45,7 @@ from overnight.domain.transport import (
 from overnight.domain.vocabulary import FailureKind
 from overnight.execution.container import (
     AGENT_DIRECTORY,
+    CAPTURE_DIRECTORY,
     CONTAINER_PYTHON,
     DOCKER_FAILED,
     ContainerUnavailable,
@@ -57,7 +61,7 @@ from overnight.execution.container import (
 )
 from overnight.execution.container import remove as remove_container
 from overnight.execution.container import sweep as sweep_containers
-from overnight.execution.usage import usage_path
+from overnight.execution.usage import capture_path, usage_path
 
 MAX_RESPONSE_BYTES = 1_048_576
 json_object = TypeAdapter(JsonObject)
@@ -220,12 +224,30 @@ class PersistentCommandAdapter(ManagedAdapter):
         timeout_seconds: float = PERSISTENT_TIMEOUT_SECONDS,
         provenance_path: Path | None = None,
         container: AgentContainer | None = None,
+        capture: bool = False,
+        policy_port: int | None = None,
     ) -> None:
+        """With `capture`, each process is told where to store the model calls it captures, and
+        `capture_paths` lists the host files the runner assigned, in start order: `capture_path`
+        of each provenance sidecar. A contained process writes to its own mount outside the agent
+        folder, copied to that path when the container ends. Capture needs a provenance path.
+        `policy_port` (training only) lets a contained process reach that one host port through
+        its egress proxy (`policy_url`). With a provenance path, each process also gets a fresh
+        folder of its own (`AGENT_DIRECTORY_VARIABLE`): the sidecar's path without its suffix on
+        the host, the mounted agent folder in a container."""
+        if capture and provenance_path is None:
+            raise ValueError("capture needs a provenance path")
+        if policy_port is not None and container is None:
+            raise ValueError("a policy port is for a contained agent")
         self.command = command
         self.timeout_seconds = timeout_seconds
         self.provenance_path = provenance_path
         self.provenance_paths: list[Path] = []
         self.container = container
+        self.capture = capture
+        self.policy_port = policy_port
+        self.capture_paths: list[Path] = []
+        self._capture_folder: Path | None = None
         self.container_name: str | None = None
         self._egress_log: Path | None = None
         self.image_id: str | None = None
@@ -249,7 +271,9 @@ class PersistentCommandAdapter(ManagedAdapter):
         self._untagged_replies: asyncio.Queue[JsonObject | _ReaderStopped] | None = None
         self._response_errors: dict[str, AdapterError] = {}
 
-    def _variables(self, provenance: Path | None) -> dict[str, str]:
+    def _variables(
+        self, provenance: Path | None, capture: str | None = None, directory: str | None = None
+    ) -> dict[str, str]:
         variables = {"OVERNIGHT_PYTHON": CONTAINER_PYTHON if self.container else sys.executable}
         if self.container is not None:
             variables["HOME"] = AGENT_DIRECTORY
@@ -261,6 +285,10 @@ class PersistentCommandAdapter(ManagedAdapter):
         if provenance is not None:
             variables["OVERNIGHT_PROVENANCE_PATH"] = str(provenance)
             variables[USAGE_PATH_VARIABLE] = str(usage_path(provenance))
+        if capture is not None:
+            variables[CAPTURE_PATH_VARIABLE] = capture
+        if directory is not None:
+            variables[AGENT_DIRECTORY_VARIABLE] = directory
         return variables
 
     async def _container_command(self) -> list[str]:
@@ -284,15 +312,24 @@ class PersistentCommandAdapter(ManagedAdapter):
             self.provenance_paths.append(self._kept / "provenance.json")
         self.container_name = new_name()
         self._egress_log = None
-        variables = self._variables(Path(PurePosixPath(AGENT_DIRECTORY, "provenance.json")))
+        capture = None
+        if self.capture and self._kept is not None:
+            # Not in the agent folder, which the agent's tools work in and which is kept whole.
+            self._capture_folder = Path(mkdtemp(prefix="overnight-capture-"))
+            own_folder(self._capture_folder)
+            self.capture_paths.append(capture_path(self._kept.with_suffix(".json")))
+            capture = str(PurePosixPath(CAPTURE_DIRECTORY, "calls.jsonl"))
+        variables = self._variables(
+            Path(PurePosixPath(AGENT_DIRECTORY, "provenance.json")), capture, AGENT_DIRECTORY
+        )
         network = "none"
-        if self.container.allow_hosts:
+        if self.container.allow_hosts or self.policy_port is not None:
             self._egress_log = folder / "egress.log"
             try:
-                network = await start_egress(self.container_name, self.container)
+                network = await start_egress(self.container_name, self.container, self.policy_port)
             except ContainerUnavailable as error:
                 raise AdapterError(str(error)) from error
-            variables |= egress_variables()
+            variables |= egress_variables(self.policy_port is not None)
         return container_command(
             self.container,
             self.command,
@@ -300,11 +337,18 @@ class PersistentCommandAdapter(ManagedAdapter):
             agent_directory=folder,
             variables=variables,
             network=network,
+            capture_directory=self._capture_folder,
         )
 
     async def _start_process(self) -> None:
         environment = os.environ.copy()
-        for key in ("OVERNIGHT_CHAT_ID", "OVERNIGHT_CHAT_NAMESPACE"):
+        # Capture comes only from this run's own setting, never from the caller's environment.
+        for key in (
+            "OVERNIGHT_CHAT_ID",
+            "OVERNIGHT_CHAT_NAMESPACE",
+            CAPTURE_PATH_VARIABLE,
+            AGENT_DIRECTORY_VARIABLE,
+        ):
             environment.pop(key, None)
         if self.container is not None:
             try:
@@ -322,7 +366,21 @@ class PersistentCommandAdapter(ManagedAdapter):
                     f"{self.provenance_path.stem}-generation-{self._generation}.json"
                 )
                 self.provenance_paths.append(path)
-            environment.update(self._variables(path))
+            capture = None
+            directory = None
+            if path is not None:
+                # The process's own folder beside its sidecars, named as a contained process's
+                # folder is kept: fresh for each process, so no two episodes share it.
+                folder = path.with_suffix("")
+                try:
+                    folder.mkdir(mode=0o700)
+                except OSError as error:
+                    raise AdapterError(f"agent process folder is unavailable: {error}") from error
+                directory = str(folder)
+                if self.capture:
+                    self.capture_paths.append(capture_path(path))
+                    capture = str(capture_path(path))
+            environment.update(self._variables(path, capture, directory))
         await self._open(command, environment)
 
     async def _remove_container(self) -> None:
@@ -333,13 +391,21 @@ class PersistentCommandAdapter(ManagedAdapter):
         if self._egress_log is not None:
             await stop_egress(self.container_name, self._egress_log)
         self.container_name = None
-        if self._mounted is not None:
-            mounted, self._mounted = self._mounted, None
-            try:
-                if self._kept is not None:
-                    keep_agent_folder(mounted, self._kept)
-            finally:
-                shutil.rmtree(mounted, ignore_errors=True)
+        try:
+            if self._mounted is not None:
+                mounted, self._mounted = self._mounted, None
+                try:
+                    if self._kept is not None:
+                        keep_agent_folder(mounted, self._kept)
+                finally:
+                    shutil.rmtree(mounted, ignore_errors=True)
+        finally:
+            if self._capture_folder is not None:
+                folder, self._capture_folder = self._capture_folder, None
+                try:
+                    _keep_capture(folder / "calls.jsonl", self.capture_paths[-1])
+                finally:
+                    shutil.rmtree(folder, ignore_errors=True)
 
     async def _open(self, command: list[str], environment: dict[str, str]) -> None:
         try:
@@ -625,7 +691,32 @@ class PersistentCommandAdapter(ManagedAdapter):
             self._portal_context = None
 
 
-def make_adapter(config: Agent, provenance_path: Path | None = None) -> ManagedAdapter:
+def _keep_capture(source: Path, target: Path) -> None:
+    """Copy a container's capture file to the host path the runner assigned. Only a regular file
+    is copied: a link there could name a host file once read outside the container."""
+    try:
+        descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        raise AdapterError(f"capture file is not a regular file: {error}") from error
+    with os.fdopen(descriptor, "rb") as captured:
+        if not stat.S_ISREG(os.fstat(captured.fileno()).st_mode):
+            raise AdapterError("capture file is not a regular file")
+        output = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(output, "wb") as kept:
+            shutil.copyfileobj(captured, kept)
+
+
+def make_adapter(
+    config: Agent,
+    provenance_path: Path | None = None,
+    capture: bool = False,
+    policy_port: int | None = None,
+) -> ManagedAdapter:
+    """`capture` asks a persistent process agent to store its model calls for training, and
+    `policy_port` lets a contained one reach the trainer's policy port (see
+    `PersistentCommandAdapter`); a scripted agent makes no calls."""
     match config:
         case HarnessAgent():
             from overnight.execution.harness import HarnessAdapter
@@ -636,6 +727,8 @@ def make_adapter(config: Agent, provenance_path: Path | None = None) -> ManagedA
                 provenance_path,
                 config.required,
                 config.container,
+                capture,
+                policy_port,
             )
         case ScriptedAgent():
             return ScriptedAdapter(
@@ -649,8 +742,12 @@ def make_adapter(config: Agent, provenance_path: Path | None = None) -> ManagedA
                 else config.timeout_seconds,
                 provenance_path,
                 config.container,
+                capture,
+                policy_port,
             )
         case CommandAgent():
+            if capture or policy_port is not None:
+                raise ValueError("training needs a harness or persistent command agent")
             return CommandAdapter(
                 config.command,
                 COMMAND_TIMEOUT_SECONDS

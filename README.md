@@ -147,6 +147,11 @@ A native harness runs as `agent.kind: "harness"`. It talks to Overnight over one
 - [Run evidence](docs/evidence.md): artifacts, provenance and `overnight inspect`
 - [Shared-world episodes](docs/shared-world-episodes.md): several tasks in one world
 - [Scenario variations](docs/scenario-variations.md): seeded noise and authored adversity
+- [Scenario families](docs/scenario-families.md): generated cases with checks, an oracle and operator answers
+- [Training rollouts](docs/rollouts.md): the rollout worker that runs episodes with token capture for an outside trainer
+- [verifiers environment](docs/verifiers.md): generated families as a verifiers environment for prime-rl and other trainers
+- [OpenEnv and TRL](docs/openenv.md): generated families as OpenEnv loop-owning sessions for TRL's async GRPO, captured by OpenEnv's proxy
+- [Tinker environment](docs/tinker.md): generated families as tinker-cookbook RL environments
 - [Harness integration](docs/harness-integration.md): control protocol, capabilities and connectors
 - [Adapter authoring](docs/adapter-authoring.md): writing a connector, steering
 - [Test scope](docs/test-scope.md): what tests cover and how to run checks
@@ -156,8 +161,8 @@ A native harness runs as `agent.kind: "harness"`. It talks to Overnight over one
 ```sh
 uv sync --extra acp
 .venv/bin/pytest -q
-.venv/bin/ruff check src tests examples scripts connectors
-.venv/bin/ruff format --check src tests examples scripts connectors
+.venv/bin/ruff check src tests examples scripts connectors integrations
+.venv/bin/ruff format --check src tests examples scripts connectors integrations
 .venv/bin/ty check src/overnight
 ```
 

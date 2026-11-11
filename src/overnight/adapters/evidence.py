@@ -6,7 +6,7 @@ from pathlib import Path
 import acp
 
 from overnight.adapters.config import Launch
-from overnight.domain.transport import USAGE_PATH_VARIABLE
+from overnight.domain.transport import AGENT_DIRECTORY_VARIABLE, USAGE_PATH_VARIABLE
 from overnight.execution.provenance import (
     CodeIdentity,
     ConnectorSidecar,
@@ -25,6 +25,15 @@ def source_identity(root: Path, release: str | None = None) -> CodeIdentity:
         digest.update(f"{len(relative)}:".encode() + relative)
         digest.update(f"{len(contents)}:".encode() + contents)
     return CodeIdentity(git_commit=None, sha256=digest.hexdigest(), version=release)
+
+
+def evidence_directory(path: Path) -> Path:
+    """Where a connector keeps its native evidence. A relative path is inside the folder the
+    runner gave this process (`AGENT_DIRECTORY_VARIABLE`), which is fresh for every process of
+    every run, so one agent document can run in many episodes; outside a run it is relative to
+    the working directory. An absolute path is used as given."""
+    folder = os.environ.get(AGENT_DIRECTORY_VARIABLE)
+    return Path(folder, path) if folder else path
 
 
 class UsageMeter:

@@ -4,6 +4,8 @@ Pinned runtime: Pi `0.86.1`, `pi-acp` `0.0.34`. Factory entry point: `overnight_
 
 `options.provider` is `openrouter` (key in `OPENROUTER_API_KEY`) or an OpenAI-compatible endpoint ([model providers](../../docs/harness-integration.md#model-providers)). When the endpoint sets `reasoning_effort`, the model is declared reasoning-capable with thinking `off` mapped to that effort.
 
+Pi never receives the provider key. The connector starts Overnight's shared loopback relay (`overnight.adapters.provider_relay`, as OpenCode and Prime do), points Pi's model definition at it with a per-run token, and makes the paid calls itself. `max_tokens`, `max_requests` (at most 40), `max_request_bytes`, the two per-million rates and `max_cost_usd` bound the run as they do for Prime; the relay refuses a request past them before paying, records each decision in `provider.jsonl`, and the Pi process stops on the refusal.
+
 ## Container
 
 Build the image from the repository root, after `overnight-agent-base` ([isolation](../../docs/harness-integration.md#isolation)):

@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError
 
 from overnight.domain.contracts import Scenario
-from overnight.domain.models import json_equal
+from overnight.domain.models import json_equal, json_matches
 from overnight.domain.values import JsonObject, at_path
 from overnight.execution.evaluation import NOT_EFFECTS, holds
 from overnight.services.operations import ServiceBoundary
@@ -235,6 +235,9 @@ def render_predicate(layer: Layer, check: JsonObject) -> str:
         body = f"{path} = {json.dumps(check.get('value'), sort_keys=True, ensure_ascii=False)}"
     elif op in {"exists", "unchanged"}:
         body = f"{path} {op}"
+    elif op == "before":
+        first = ", ".join(_flatten(_obj(check.get("first"))))
+        body = f"{first} before " + ", ".join(_flatten(_obj(check.get("then"))))
     else:
         body = json.dumps(check, sort_keys=True, ensure_ascii=False)
     source = _str(check.get("source")) or "state"
@@ -319,6 +322,14 @@ def _check_lines(
             line
             for line, row in index.entries
             if row.get("kind") == "agent_report" and _matches_value(check, _obj(row.get("payload")))
+        ]
+    if check.get("op") == "before":
+        patterns = (check.get("first"), check.get("then"))
+        return [
+            line
+            for line, row in index.entries
+            if row.get("kind") not in NOT_EFFECTS
+            and any(json_matches(row, pattern) for pattern in patterns)
         ]
     return [
         line

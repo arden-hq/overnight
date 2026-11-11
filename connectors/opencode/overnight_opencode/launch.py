@@ -23,7 +23,7 @@ from overnight.adapters.evidence import source_identity
 from overnight.adapters.http import serve_http
 from overnight.adapters.protocol import Steer
 from overnight.adapters.provider import api_key, endpoint, provider_record
-from overnight.adapters.provider_relay import ProviderRelay
+from overnight.adapters.provider_relay import ProviderRelay, run_capture
 from overnight.execution.harness import Capabilities, HarnessStatus
 from overnight.execution.provenance import ModelConfiguration
 from overnight_opencode.native import OpenCodeClient
@@ -210,7 +210,13 @@ async def prepare(context: SessionContext) -> Launch:
     try:
         client = await stack.enter_async_context(httpx.AsyncClient(timeout=90))
         relay = ProviderRelay(
-            options, options.provider, options.upstream_model, secret, client, record
+            options,
+            options.provider,
+            options.upstream_model,
+            secret,
+            client,
+            record,
+            capture=run_capture(),
         )
         relay_url = await stack.enter_async_context(serve_http(relay.app))
 

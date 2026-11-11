@@ -6,6 +6,10 @@ import socket
 import sys
 
 READY = "egress proxy ready"
+# Training only: the proxy's own port that passes a connection, unread, to one port of the host
+# (`--policy-port`), where the trainer serves the policy under training on loopback.
+POLICY_LISTEN_PORT = 3129
+POLICY_HOST = "host.docker.internal"
 HEADER_LIMIT = 16 * 1024
 HEADER_SECONDS = 10.0
 CONNECT_SECONDS = 15.0
@@ -93,24 +97,52 @@ async def _serve(
     await asyncio.gather(_pipe(reader, upstream_writer), _pipe(upstream_reader, writer))
 
 
-async def serve(port: int, hosts: frozenset[str]) -> None:
+async def _forward(
+    target: tuple[str, int], reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+) -> None:
+    host, port = target
+    try:
+        upstream_reader, upstream_writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), CONNECT_SECONDS
+        )
+    except (OSError, TimeoutError) as error:
+        _log(decision="refused", policy=f"{host}:{port}", reason=type(error).__name__)
+        writer.close()
+        return
+    _log(decision="allowed", policy=f"{host}:{port}")
+    await asyncio.gather(_pipe(reader, upstream_writer), _pipe(upstream_reader, writer))
+
+
+async def serve(port: int, hosts: frozenset[str], policy: tuple[str, int] | None = None) -> None:
+    """Serve CONNECT to the allowed hosts on `port`. With `policy`, also pass every connection to
+    `POLICY_LISTEN_PORT` through to that one host and port, and nowhere else."""
     server = await asyncio.start_server(
         lambda reader, writer: _serve(hosts, reader, writer),
         host="0.0.0.0",
         port=port,
         limit=HEADER_LIMIT,
     )
+    servers = [server]
+    if policy is not None:
+        servers.append(
+            await asyncio.start_server(
+                lambda reader, writer: _forward(policy, reader, writer),
+                host="0.0.0.0",
+                port=POLICY_LISTEN_PORT,
+            )
+        )
     print(READY, flush=True)
-    async with server:
-        await server.serve_forever()
+    await asyncio.gather(*(server.serve_forever() for server in servers))
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--allow", action="append", default=[])
+    parser.add_argument("--policy-port", type=int)
     options = parser.parse_args()
-    asyncio.run(serve(options.port, frozenset(host.lower() for host in options.allow)))
+    policy = None if options.policy_port is None else (POLICY_HOST, options.policy_port)
+    asyncio.run(serve(options.port, frozenset(host.lower() for host in options.allow), policy))
 
 
 if __name__ == "__main__":

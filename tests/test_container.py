@@ -241,3 +241,73 @@ def test_a_start_that_times_out_leaves_no_proxy_or_network(tmp_path):
 
     for listing in (["ps", "--all"], ["network", "ls"]):
         assert _leftovers(*listing) == "", listing
+
+
+POLICY_PROBE = r"""
+import json, sys, urllib.request
+base_url, other = sys.argv[1:3]
+def get(url):
+    try:
+        with urllib.request.urlopen(url, timeout=10) as response:
+            return response.status
+    except Exception as error:
+        return type(error).__name__
+for line in sys.stdin:
+    get(base_url + "/models")
+    get(f"http://host.docker.internal:{other}/")
+    print(json.dumps({"kind": "done"}), flush=True)
+"""
+
+
+def test_a_training_rollout_forwards_only_the_policy_port_to_a_contained_agent(tmp_path):
+    import http.server
+    import threading
+
+    from overnight.adapters.rollout import RolloutRequest, RolloutWorker
+
+    hits: dict[str, list[str]] = {"policy": [], "other": []}
+
+    def handler(name: str) -> type[http.server.BaseHTTPRequestHandler]:
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                hits[name].append(self.path)
+                self.send_response(200)
+                self.end_headers()
+
+        return Handler
+
+    servers = {
+        name: http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler(name)) for name in hits
+    }
+    for server in servers.values():
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    policy_port = servers["policy"].server_address[1]
+    other_port = servers["other"].server_address[1]
+    request = RolloutRequest.model_validate(
+        {
+            "scenario": load_json(EXAMPLES / "catering-chaos.json"),
+            "agent": {
+                "kind": "persistent_command",
+                "command": ["python3", "-c", POLICY_PROBE, "{policy.base_url}", str(other_port)],
+                "container": {"image": IMAGE},
+            },
+            "policy": {
+                "provider": {
+                    "base_url": f"http://127.0.0.1:{policy_port}/v1",
+                    "api_key_env": "POLICY_TEST_KEY",
+                },
+                "model": "policy/model",
+            },
+            "capture": False,
+        }
+    )
+    try:
+        rollout = RolloutWorker(tmp_path / "rollouts").rollout(request)
+    finally:
+        for server in servers.values():
+            server.shutdown()
+
+    assert rollout.failure is None or rollout.failure.kind == "agent"
+    assert hits == {"policy": ["/v1/models"], "other": []}
+    for listing in (["ps", "--all"], ["network", "ls"]):
+        assert _leftovers(*listing) == "", listing

@@ -11,11 +11,13 @@ from pathlib import Path
 from typing import BinaryIO
 
 import anyio
+from pydantic import TypeAdapter
 
 from overnight.adapters.files import replace_private_json, write_private_json
 from overnight.adapters.processes import ProcessTree, process_listing, stop_trees
 from overnight.domain.contracts import JsonObject
 from overnight.execution.container import sweep as sweep_containers
+from overnight.execution.evaluation import score
 from overnight.execution.scenario import load_json
 from overnight.execution.suite import PlannedCell, Suite, SuitePlan, load_suite
 from overnight.execution.suite_report import (
@@ -140,6 +142,21 @@ def attempt_outcome(run_dir: Path) -> AttemptOutcome:
     return VERDICT_OUTCOMES.get(str(verdict.get("verdict")), "error")
 
 
+def attempt_score(run_dir: Path) -> float | None:
+    verdict = _verdict(run_dir)
+    if verdict is None:
+        return None
+    path = run_dir / "task-outcomes.json"
+    if not path.exists():
+        return score(verdict)
+    try:
+        tasks = TypeAdapter(list[JsonObject]).validate_json(path.read_bytes())
+    except OSError, ValueError:
+        # Unreadable task grades leave the attempt without a score, never a guessed one.
+        return None
+    return score(verdict, tasks)
+
+
 def retryable(run_dir: Path) -> bool:
     match attempt_outcome(run_dir):
         case "invalid" | "agent_failed":
@@ -202,22 +219,22 @@ def _spend(run_dirs: Sequence[Path]) -> ArmSpend:
 
 def collect_report(suite: Suite, out: Path) -> SuiteReport:
     outcomes: dict[tuple[str, str], list[AttemptOutcome]] = {}
+    scores: dict[tuple[str, str], list[float | None]] = {}
     retries = dict.fromkeys((arm.id for arm in suite.arms), 0)
     runs: dict[str, list[Path]] = {arm.id: [] for arm in suite.arms}
     for arm in suite.arms:
         for case in suite.cases:
             cell = outcomes.setdefault((arm.id, case.id), [])
+            score_cell = scores.setdefault((arm.id, case.id), [])
             for attempt in range(1, suite.attempts + 1):
                 tries = _tries(out, arm.id, case.id, attempt)
-                cell.append(
-                    attempt_outcome(
-                        tries[-1] if tries else _attempt_dir(out, arm.id, case.id, attempt)
-                    )
-                )
+                last = tries[-1] if tries else _attempt_dir(out, arm.id, case.id, attempt)
+                cell.append(attempt_outcome(last))
+                score_cell.append(attempt_score(last))
                 retries[arm.id] += _retries(tries)
                 runs[arm.id] += tries
     return summarize_suite(
-        suite, outcomes, retries, {arm: _spend(paths) for arm, paths in runs.items()}
+        suite, outcomes, retries, {arm: _spend(paths) for arm, paths in runs.items()}, scores
     )
 
 

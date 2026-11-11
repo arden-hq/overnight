@@ -1,5 +1,7 @@
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
+from functools import cache
 from typing import Protocol
 
 from jsonschema import Draft202012Validator, validators
@@ -16,6 +18,11 @@ from overnight.services.state import State
 
 class Parameters(Contract):
     pass
+
+
+@cache
+def _input_schema(parameters: type[Parameters]) -> JsonObject:
+    return parameters.model_json_schema(by_alias=True)
 
 
 class NoArguments(Parameters):
@@ -91,7 +98,9 @@ class OperationSpec[S: State, P: Parameters]:
 
     @property
     def input_schema(self) -> JsonObject:
-        return self.parameters.model_json_schema(by_alias=True)
+        # Every observation lists the operations, so the schema is built once per parameter type
+        # for the process; callers get their own copy.
+        return deepcopy(_input_schema(self.parameters))
 
     def invoke(self, state: S, args: JsonObject, context: Context) -> JsonObject | Transition[S]:
         return self.handler(state, self.parameters.model_validate(args), context)

@@ -1,15 +1,20 @@
+import json
 import os
 import shlex
 import shutil
+from contextlib import AsyncExitStack
 from pathlib import Path
 
+import httpx
 from pydantic import BaseModel, Field, model_validator
 
 from overnight.adapters.config import Factory, Launch, SessionContext
 from overnight.adapters.evidence import source_identity
 from overnight.adapters.files import write_private_json
+from overnight.adapters.http import serve_http
 from overnight.adapters.provider import Provider, api_key, endpoint, provider_record
-from overnight.domain.contracts import Contract, JsonObject
+from overnight.adapters.provider_relay import ProviderRelay, RequestBudget, run_capture
+from overnight.domain.contracts import JsonObject
 from overnight.execution.harness import Capabilities
 from overnight.execution.provenance import ModelConfiguration
 from overnight_pi.profile import NativeProfile
@@ -19,30 +24,22 @@ class PackageMetadata(BaseModel):
     version: str
 
 
-class PiOptions(Contract):
+# Pi reaches the provider only through the connector's loopback relay, which holds the key and
+# bounds paid requests. Pi gets the relay's per-run token in this variable.
+RELAY_KEY_ENV = "OVERNIGHT_PI_PROXY_KEY"
+
+
+class PiOptions(RequestBudget):
     runtime: Path = Field(strict=False)
     provider: Provider = "openrouter"
     native: NativeProfile = Field(default_factory=NativeProfile)
     model: str = "openai/gpt-6-luna"
     reasoning: bool = False
-    max_tokens: int = Field(default=2048, ge=1, le=4096)
-    max_requests: int = Field(default=12, ge=1, le=80)
-    max_request_bytes: int = Field(default=262144, ge=1024, le=1048576)
-    input_usd_per_million: float = Field(gt=0)
-    output_usd_per_million: float = Field(gt=0)
-    max_cost_usd: float = Field(default=1, gt=0, le=5)
 
     @model_validator(mode="after")
-    def require_affordable_limits(self):
+    def require_reasoning_model(self):
         if self.native.thinking != "off" and not self.reasoning:
             raise ValueError("thinking requires a reasoning-capable model definition")
-        prompt_bound = self.max_request_bytes + 4096
-        per_request = (
-            prompt_bound * self.input_usd_per_million
-            + self.max_tokens * self.output_usd_per_million
-        ) / 1_000_000
-        if self.max_requests * per_request > self.max_cost_usd:
-            raise ValueError("request limits exceed the configured cost bound")
         return self
 
 
@@ -61,9 +58,7 @@ def _reasoning(options: PiOptions) -> JsonObject:
 
 async def prepare(context: SessionContext) -> Launch:
     options = PiOptions.model_validate(context.options)
-    provider = endpoint(options.provider)
-    key = provider.api_key_env
-    secret = api_key(provider)
+    secret = api_key(endpoint(options.provider))
     runtime = options.runtime.resolve()
     node = shutil.which("node")
     if node is None:
@@ -89,12 +84,9 @@ async def prepare(context: SessionContext) -> Launch:
     descriptor = os.open(binding, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w") as output:
         output.write(source)
-    counter = root / "requests.count"
-    os.close(os.open(counter, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
     write_private_json(
         root / "tools.json",
         {
-            "request_counter": str(counter),
             "binding_receipts": str(bindings),
             "chat_id": context.chat_id,
             "endpoint": context.endpoint,
@@ -114,29 +106,7 @@ async def prepare(context: SessionContext) -> Launch:
             "defaultTools": [str(tool) for tool in options.native.builtin_tools],
         },
     )
-    write_private_json(
-        agent / "models.json",
-        {
-            "providers": {
-                "overnight": {
-                    "baseUrl": provider.base_url,
-                    "api": "openai-completions",
-                    "apiKey": f"${key}",
-                    "authHeader": True,
-                    "models": [
-                        {
-                            "id": options.model,
-                            "name": options.model,
-                            **_reasoning(options),
-                            "input": ["text"],
-                            "contextWindow": 262144,
-                            "maxTokens": options.max_tokens,
-                        }
-                    ],
-                }
-            }
-        },
-    )
+
     command = [
         node,
         str(pi),
@@ -152,19 +122,70 @@ async def prepare(context: SessionContext) -> Launch:
     descriptor = os.open(launcher, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o700)
     with os.fdopen(descriptor, "w") as output:
         output.write(f'#!/bin/sh\nexec {shlex.join(command)} "$@"\n')
+    runtime_code = source_identity(
+        modules,
+        ";".join(
+            f"{name}={PackageMetadata.model_validate_json((modules / name / 'package.json').read_bytes()).version}"
+            for name in (
+                "@earendil-works/pi-coding-agent",
+                "pi-acp",
+                "@modelcontextprotocol/sdk",
+            )
+        ),
+    )
+
+    def record(value):
+        with (root / "provider.jsonl").open("a") as output:
+            output.write(json.dumps(value) + "\n")
+
+    os.close(os.open(root / "provider.jsonl", os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+    stack = AsyncExitStack()
+    try:
+        client = await stack.enter_async_context(httpx.AsyncClient(timeout=90))
+        relay = ProviderRelay(
+            options,
+            options.provider,
+            options.model,
+            secret,
+            client,
+            record,
+            capture=run_capture(),
+        )
+        relay_url = await stack.enter_async_context(serve_http(relay.app))
+        write_private_json(
+            agent / "models.json",
+            {
+                "providers": {
+                    "overnight": {
+                        "baseUrl": relay_url + "/v1",
+                        "api": "openai-completions",
+                        "apiKey": f"${RELAY_KEY_ENV}",
+                        "authHeader": True,
+                        "models": [
+                            {
+                                "id": options.model,
+                                "name": options.model,
+                                **_reasoning(options),
+                                "input": ["text"],
+                                "contextWindow": 262144,
+                                "maxTokens": options.max_tokens,
+                            }
+                        ],
+                    }
+                }
+            },
+        )
+    except BaseException:
+        await stack.aclose()
+        raise
+
+    async def close():
+        record({"kind": "provider_closed", "requests": relay.requests})
+        await stack.aclose()
+
     return Launch(
         adapter_code=source_identity(Path(__file__).parent, "0.1.0"),
-        runtime_code=source_identity(
-            modules,
-            ";".join(
-                f"{name}={PackageMetadata.model_validate_json((modules / name / 'package.json').read_bytes()).version}"
-                for name in (
-                    "@earendil-works/pi-coding-agent",
-                    "pi-acp",
-                    "@modelcontextprotocol/sdk",
-                )
-            ),
-        ),
+        runtime_code=runtime_code,
         model=ModelConfiguration(
             name=options.model,
             uses_runtime_defaults=True,
@@ -188,10 +209,9 @@ async def prepare(context: SessionContext) -> Launch:
             "PI_OFFLINE": "1",
             "PI_TELEMETRY": "0",
             "OVERNIGHT_PI_TOOLS": str(root / "tools.json"),
-            "OVERNIGHT_PI_MAX_REQUESTS": str(options.max_requests),
-            "OVERNIGHT_PI_MAX_BYTES": str(options.max_request_bytes),
-            key: secret,
+            RELAY_KEY_ENV: relay.token,
         },
+        close=close,
     )
 
 

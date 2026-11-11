@@ -53,13 +53,20 @@ path to the generated Feather harness command:
 
 ```sh
 .venv/bin/python scripts/prepare_harness_catering.py --harness feather \
-  --run-dir .local/runs/feather-check --out .local/cases/feather-check.json --max-cost 0.5
+  --run-dir .local/runs/feather-check --out .local/cases/feather-check.json --max-cost 1
 .venv/bin/overnight run .local/cases/feather-check.json --out .local/runs/feather-check
 ```
 
 The generator selects GPT-6 Luna and explicit conservative route prices. Supply
 `OPENROUTER_API_KEY` to the process. Use fresh paths. Allocate budgets across
 per-chat processes; each connector's `--max-cost` is its own budget.
+
+The model client reaches the provider only through Overnight's shared loopback relay
+(`overnight.adapters.provider_relay`), started in the connector process, which holds the key.
+The relay sends at most `--max-requests` (default 12, at most 40) requests of at most
+`--max-request-bytes`, replaces each request's output bound with `--max-tokens`, and refuses
+another request before paying. These limits at the configured rates must fit `--max-cost`, or
+the connector does not start. Its decisions are in `provider.jsonl` beside `native.jsonl`.
 
 For a child-effect check, ask the parent to use `spawn_agent` to read a world record,
 then send a specified message through a world tool and return the record value;

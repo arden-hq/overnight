@@ -14,7 +14,7 @@ from overnight.adapters.files import write_private_json
 from overnight.adapters.http import serve_http
 from overnight.adapters.provider import api_key, provider_record
 from overnight.adapters.provider import endpoint as provider_endpoint
-from overnight.adapters.provider_relay import ProviderRelay
+from overnight.adapters.provider_relay import ProviderRelay, run_capture
 from overnight.execution.harness import Capabilities
 from overnight.execution.provenance import ModelConfiguration
 from overnight_prime.lifecycle import NativeLifecycle, require_evaluation_build
@@ -107,6 +107,7 @@ async def prepare(context: SessionContext) -> Launch:
             client,
             record,
             UsageMeter(),
+            capture=run_capture(),
         )
         endpoint = await stack.enter_async_context(serve_http(relay.app))
         write_private_json(

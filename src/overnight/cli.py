@@ -1,6 +1,9 @@
+import errno
 import json
 import os
+import shutil
 import signal
+import tempfile
 import time
 from pathlib import Path
 
@@ -20,12 +23,20 @@ from overnight.execution.operator import (
     OperatorUnavailable,
     RecordedTransport,
 )
-from overnight.execution.qa import check_scenario, check_suite, qa_exit_code, render_qa
+from overnight.execution.qa import (
+    AuthoredProbe,
+    ProbeFile,
+    check_scenario,
+    check_suite,
+    qa_exit_code,
+    render_qa,
+)
 from overnight.execution.runtime import run_scenario
 from overnight.execution.scenario import ResolvedScenario, load_json
-from overnight.execution.suite import plan_suite
+from overnight.execution.suite import Suite, load_suite, plan_suite
 from overnight.execution.suite_report import SuiteReport, render_report
 from overnight.execution.variations import VariationConfig, resolve_variant
+from overnight.families import FAMILIES, SEEDS, Case, FamilyError, generate
 
 INFRASTRUCTURE_EXIT_CODE = 4
 USAGE_EXIT_CODE = 64
@@ -36,6 +47,32 @@ class InfrastructureError(click.ClickException):
 
     def __init__(self, error: BaseException) -> None:
         super().__init__(f"runtime error: {type(error).__name__}: {error}")
+
+
+class InvalidInputError(click.ClickException):
+    exit_code = 3
+
+
+def _load_probes(path: Path) -> list[AuthoredProbe]:
+    try:
+        return ProbeFile.model_validate(load_json(path)).probes
+    except ValueError as error:
+        raise InvalidInputError(f"invalid probes file {path}: {error}") from error
+
+
+def _check_qa_files(path: Path, suite: Suite) -> None:
+    """Read every case's ``operator_answers`` and ``probes`` file, which only `suite qa` uses."""
+    for case in suite.cases:
+        if case.probes is not None:
+            _load_probes(path.parent / case.probes)
+        if case.operator_answers is not None:
+            answers = path.parent / case.operator_answers
+            try:
+                RecordedTransport.load(answers)
+            except ValueError as error:
+                raise InvalidInputError(
+                    f"invalid operator answers file {answers}: {error}"
+                ) from error
 
 
 def _write_private(path: Path, content: str) -> None:
@@ -176,14 +213,21 @@ def run(
     "--allow-command", is_flag=True, help="Run a command agent as the oracle; it may call a model."
 )
 @OPERATOR_ANSWERS
+@click.option(
+    "--probes",
+    type=click.Path(path_type=Path),
+    help="Wrong agents the scenario must also reject, as written by `overnight generate`.",
+)
 def qa(
     scenario: Path,
     overrides: Path | None,
     variation: Path | None,
     allow_command: bool,
     operator_answers: Path | None,
+    probes: Path | None,
 ) -> int:
     """Prove a scenario passes its oracle and rejects agents that do no work."""
+    authored = _load_probes(probes) if probes is not None else []
     report = check_scenario(
         scenario.stem,
         load_json(scenario),
@@ -191,9 +235,97 @@ def qa(
         VariationConfig.model_validate(load_json(variation)) if variation is not None else None,
         allow_command=allow_command,
         operator_answers=operator_answers,
+        authored=authored,
     )
     click.echo(render_qa([report]))
     return qa_exit_code([report])
+
+
+@cli.command("generate")
+@click.argument("family", type=click.Choice(sorted(FAMILIES)))
+@click.option("--count", type=click.IntRange(1, len(SEEDS)), default=1, show_default=True)
+@click.option(
+    "--seed",
+    type=click.IntRange(SEEDS.start, SEEDS.stop - 1),
+    default=0,
+    show_default=True,
+    help="First seed.",
+)
+@click.option("--out", required=True, type=click.Path(path_type=Path), help="A new directory.")
+def generate_cases(family: str, count: int, seed: int, out: Path) -> int:
+    """Write COUNT cases of a scenario family: scenarios, operator answers, probes and an
+    index. The directory appears whole or not at all, and a failure removes the parent
+    directories it created."""
+    if seed + count > SEEDS.stop:
+        raise click.BadParameter(
+            f"seeds {seed} to {seed + count - 1} pass the last seed {SEEDS.stop - 1}",
+            param_hint="--count",
+        )
+    if out.exists() or out.is_symlink():
+        raise FileExistsError(errno.EEXIST, "exists", str(out))
+    try:
+        cases = [generate(family, seed + offset) for offset in range(count)]
+    except FamilyError as error:
+        raise click.ClickException(str(error)) from error
+    parent = out.absolute().parent
+    created = [path for path in (parent, *parent.parents) if not path.exists()]
+    staging: Path | None = None
+    try:
+        try:
+            parent.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            raise click.ClickException(f"cannot create {out}: {error.strerror or error}") from error
+        try:
+            staging = Path(tempfile.mkdtemp(prefix=f".{out.name}-", dir=parent))
+            _write_cases(staging, family, cases)
+            if out.exists() or out.is_symlink():
+                raise FileExistsError(errno.EEXIST, "exists", str(out))
+            staging.rename(out)
+        except FileExistsError:
+            raise
+        except OSError as error:
+            raise click.ClickException(f"cannot write {out}: {error}") from error
+        staging = None
+    except BaseException:
+        if staging is not None:
+            shutil.rmtree(staging, ignore_errors=True)
+        for path in created:  # Deepest first; a directory something else filled stays.
+            try:
+                path.rmdir()
+            except OSError:
+                break
+        raise
+    click.echo(f"wrote {len(cases)} cases to {out}")
+    return 0
+
+
+def _write_cases(out: Path, family: str, cases: list[Case]) -> None:
+    index: list[JsonValue] = []
+    for case in cases:
+        answers = f"{case.id}-operator.jsonl"
+        _write_json(out / f"{case.id}.json", case.scenario)
+        _write_private(
+            out / answers,
+            "".join(
+                json.dumps(answer, sort_keys=True, ensure_ascii=False) + "\n"
+                for answer in case.operator_answers
+            ),
+        )
+        _write_json(
+            out / f"{case.id}-probes.json",
+            ProbeFile(probes=case.probes).model_dump(mode="json"),
+        )
+        index.append(
+            {
+                "id": case.id,
+                "seed": case.seed,
+                "scenario": f"{case.id}.json",
+                "operator_answers": answers,
+                "probes": f"{case.id}-probes.json",
+                "facts": case.facts,
+            }
+        )
+    _write_json(out / "family.json", {"family": family, "cases": index})
 
 
 @cli.group()
@@ -206,6 +338,7 @@ def suite() -> None:
 def suite_validate(path: Path) -> int:
     """Resolve every arm on every case and show the planned attempts."""
     plan = plan_suite(path)
+    _check_qa_files(path, plan.suite)
     click.echo(
         json.dumps(
             {
@@ -226,6 +359,7 @@ def suite_validate(path: Path) -> int:
 )
 def suite_qa(path: Path, allow_command: bool) -> int:
     """Check every case of a suite."""
+    _check_qa_files(path, load_suite(path))
     reports = check_suite(path, allow_command=allow_command)
     click.echo(render_qa(reports))
     return qa_exit_code(reports)

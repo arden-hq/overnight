@@ -27,7 +27,7 @@ from overnight.adapters.config import (
     SessionContext,
     load_factory,
 )
-from overnight.adapters.evidence import UsageMeter, write_provenance
+from overnight.adapters.evidence import UsageMeter, evidence_directory, write_provenance
 from overnight.adapters.host import serve
 from overnight.adapters.protocol import Lifecycle, Observe, Steer
 from overnight.domain.contracts import JsonObject, action_contract
@@ -528,9 +528,11 @@ class Connector:
 
 
 async def run_config(config: AdapterConfig) -> None:
+    evidence = evidence_directory(config.evidence)
     namespace = os.environ.get("OVERNIGHT_CHAT_NAMESPACE")
     if namespace is not None:
-        config = config.model_copy(update={"evidence": config.evidence / "chats" / namespace})
+        evidence = evidence / "chats" / namespace
+    config = config.model_copy(update={"evidence": evidence})
     connector = Connector(config, load_factory(config.factory))
     await serve(
         connector.factory.capabilities,

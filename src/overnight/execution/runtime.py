@@ -1,6 +1,6 @@
 import json
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Literal
@@ -93,9 +93,12 @@ class RunResult:
     usage: ProcessUsage = UNMEASURED
     task_outcomes: list[JsonObject] | None = None
     operator_usage: ProcessUsage = NO_CALLS
+    capture_paths: list[Path] = field(default_factory=list)
+    """The capture files this run assigned its agent processes, in start order (training only)."""
 
     def to_dict(self) -> JsonObject:
         value = asdict(self)
+        del value["capture_paths"]
         if self.task_outcomes is None:
             del value["task_outcomes"]
         return value
@@ -939,12 +942,20 @@ def run_scenario(
     adapters: Mapping[str, AgentAdapter] | None = None,
     agent_folder: Path | None = None,
     operator_transport: OperatorTransport | None = None,
+    capture: bool = False,
+    policy_port: int | None = None,
 ) -> RunResult:
     """Run and grade a scenario, closing only adapters created by this function.
 
     ``agent_folder`` keeps the agent's sidecars and, for a contained agent, everything it wrote;
     without it they live in a temporary folder. ``operator_transport`` answers for a persona
-    operator: a model transport, recorded answers, or a test fake."""
+    operator: a model transport, recorded answers, or a test fake. ``capture`` (training only)
+    asks the agent's processes to store their model calls beside their sidecars in
+    ``agent_folder``. ``policy_port`` (training only) lets a contained agent reach that one port
+    of the host, where the trainer serves its policy, at ``policy_url``."""
+    training = capture or policy_port is not None
+    if training and (agent_folder is None or adapter is not None or adapters is not None):
+        raise AdapterError("training needs an agent folder and adapters this run creates")
     if scenario.config.tasks:
         from overnight.execution.episode import run_episode
 
@@ -955,7 +966,12 @@ def run_scenario(
                 raise AdapterError("episodes with multiple chats require per-chat adapters")
             adapters = {task.chat_id: adapter for task in scenario.config.tasks}
         return run_episode(
-            scenario, adapters, agent_folder=agent_folder, operator_transport=operator_transport
+            scenario,
+            adapters,
+            agent_folder=agent_folder,
+            operator_transport=operator_transport,
+            capture=capture,
+            policy_port=policy_port,
         )
     if adapters is not None:
         raise AdapterError("per-chat adapters require a scenario with tasks")
@@ -964,7 +980,9 @@ def run_scenario(
     if isinstance(scenario.config.agent, (CommandAgent, HarnessAgent)):
         if agent_folder is not None:
             agent_folder.mkdir(mode=0o700)
-            return _run_owned(scenario, agent_folder / "connector.json", operator_transport)
+            return _run_owned(
+                scenario, agent_folder / "connector.json", operator_transport, capture, policy_port
+            )
         with TemporaryDirectory(prefix="overnight-provenance-") as directory:
             return _run_owned(scenario, Path(directory) / "connector.json", operator_transport)
     return _run_owned(scenario, None, operator_transport)
@@ -974,12 +992,15 @@ def _run_owned(
     scenario: ResolvedScenario,
     provenance_path: Path | None,
     operator_transport: OperatorTransport | None,
+    capture: bool = False,
+    policy_port: int | None = None,
 ) -> RunResult:
-    owned = (
-        make_adapter(scenario.config.agent, provenance_path)
-        if provenance_path is not None
-        else make_adapter(scenario.config.agent)
-    )
+    if capture or policy_port is not None:
+        owned = make_adapter(scenario.config.agent, provenance_path, capture, policy_port)
+    elif provenance_path is not None:
+        owned = make_adapter(scenario.config.agent, provenance_path)
+    else:
+        owned = make_adapter(scenario.config.agent)
     trial: Trial | None = None
     try:
         trial = Trial(scenario, owned, operator_transport)
@@ -1015,4 +1036,6 @@ def _run_owned(
         owned, (CommandAdapter, PersistentCommandAdapter)
     ):
         result.usage = read_usage(owned.provenance_paths)
+    if isinstance(owned, PersistentCommandAdapter):
+        result.capture_paths = list(owned.capture_paths)
     return result

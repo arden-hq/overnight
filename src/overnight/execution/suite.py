@@ -13,12 +13,16 @@ type SuiteId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9
 
 
 class SuiteCase(Contract):
-    """One world: a scenario file with its optional overrides and variation."""
+    """One world: a scenario file with its optional overrides and variation. ``operator_answers``
+    and ``probes`` are for `suite qa` only: the recorded answers that prove a persona case's
+    oracle, and the wrong agents the case must reject."""
 
     id: SuiteId
     scenario: str
     overrides: str | None = None
     variation: str | None = None
+    operator_answers: str | None = None
+    probes: str | None = None
 
 
 class SuiteArm(Contract):

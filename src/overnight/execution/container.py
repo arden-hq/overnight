@@ -9,9 +9,11 @@ import anyio
 
 import overnight
 from overnight.domain.contracts import AgentContainer
-from overnight.execution.egress_proxy import READY
+from overnight.execution.egress_proxy import POLICY_LISTEN_PORT, READY
 
 AGENT_DIRECTORY = "/overnight/agent"
+# A capturing process's own folder, outside the agent folder and its working directory.
+CAPTURE_DIRECTORY = "/overnight/capture"
 # docker run's own exit code when it cannot create or start the container.
 DOCKER_FAILED = 125
 DOCKER = "docker"
@@ -102,6 +104,7 @@ def container_command(
     agent_directory: Path,
     variables: dict[str, str],
     network: str = "none",
+    capture_directory: Path | None = None,
 ) -> list[str]:
     arguments = [
         DOCKER,
@@ -133,6 +136,8 @@ def container_command(
         "--mount",
         f"type=bind,source={agent_directory},target={AGENT_DIRECTORY}",
     ]
+    if capture_directory is not None:
+        arguments += ["--mount", f"type=bind,source={capture_directory},target={CAPTURE_DIRECTORY}"]
     for mount in spec.mounts:
         option = f"type=bind,source={Path(mount.source).resolve()},target={mount.target}"
         arguments += ["--mount", f"{option},readonly" if mount.read_only else option]
@@ -163,15 +168,22 @@ def egress_names(name: str) -> tuple[str, str]:
     return f"{name}-net", f"{name}-egress"
 
 
-def egress_variables() -> dict[str, str]:
+def policy_url(path: str) -> str:
+    """Where a contained agent reaches the forwarded policy port (see `start_egress`)."""
+    return f"http://{EGRESS_ALIAS}:{POLICY_LISTEN_PORT}{path}"
+
+
+def egress_variables(policy: bool = False) -> dict[str, str]:
     proxy = f"http://{EGRESS_ALIAS}:{EGRESS_PORT}"
+    # The forwarded policy port is reached directly, not through the CONNECT proxy.
+    direct = "localhost,127.0.0.1,::1" + (f",{EGRESS_ALIAS}" if policy else "")
     return {
         "HTTPS_PROXY": proxy,
         "https_proxy": proxy,
         "HTTP_PROXY": proxy,
         "http_proxy": proxy,
-        "NO_PROXY": "localhost,127.0.0.1,::1",
-        "no_proxy": "localhost,127.0.0.1,::1",
+        "NO_PROXY": direct,
+        "no_proxy": direct,
         # Node's fetch ignores the proxy variables unless told to read them.
         "NODE_USE_ENV_PROXY": "1",
     }
@@ -181,10 +193,14 @@ def network_environment() -> dict[str, str]:
     return {key: os.environ[key] for key in egress_variables() if key in os.environ}
 
 
-async def start_egress(name: str, spec: AgentContainer) -> str:
+async def start_egress(name: str, spec: AgentContainer, policy_port: int | None = None) -> str:
+    """Start the agent's internal network and its one exit. `policy_port` (training only) also
+    opens the proxy's policy port, which passes connections to that one port of the host."""
     network, proxy = egress_names(name)
     await _docker("network", "create", "--internal", *_labels(), network)
     allow = [part for host in spec.allow_hosts for part in ("--allow", host)]
+    if policy_port is not None:
+        allow += ["--policy-port", str(policy_port)]
     await _docker(
         "run",
         "--detach",

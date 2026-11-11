@@ -396,13 +396,17 @@ def run_episode(
     *,
     agent_folder: Path | None = None,
     operator_transport: OperatorTransport | None = None,
+    capture: bool = False,
+    policy_port: int | None = None,
 ) -> RunResult:
     if adapters is not None:
         return Episode(scenario, adapters, operator_transport).run()
     if isinstance(scenario.config.agent, (CommandAgent, HarnessAgent)):
         if agent_folder is not None:
             agent_folder.mkdir(mode=0o700)
-            return _run_owned_episode(scenario, agent_folder, operator_transport)
+            return _run_owned_episode(
+                scenario, agent_folder, operator_transport, capture, policy_port
+            )
         with TemporaryDirectory(prefix="overnight-episode-provenance-") as directory:
             return _run_owned_episode(scenario, Path(directory), operator_transport)
     return _run_owned_episode(scenario, None, operator_transport)
@@ -412,6 +416,8 @@ def _run_owned_episode(
     scenario: ResolvedScenario,
     provenance_root: Path | None,
     operator_transport: OperatorTransport | None,
+    capture: bool = False,
+    policy_port: int | None = None,
 ) -> RunResult:
     owned: dict[str, ManagedAdapter] = {}
     trial: Episode | None = None
@@ -424,11 +430,14 @@ def _run_owned_episode(
                     if provenance_root is not None
                     else None
                 )
-                owned[task.chat_id] = (
-                    make_adapter(scenario.config.agent, path)
-                    if path is not None
-                    else make_adapter(scenario.config.agent)
-                )
+                if capture or policy_port is not None:
+                    owned[task.chat_id] = make_adapter(
+                        scenario.config.agent, path, capture, policy_port
+                    )
+                elif path is not None:
+                    owned[task.chat_id] = make_adapter(scenario.config.agent, path)
+                else:
+                    owned[task.chat_id] = make_adapter(scenario.config.agent)
         trial = Episode(scenario, owned, operator_transport)
         trial.execute()
     finally:
@@ -465,4 +474,10 @@ def _run_owned_episode(
     )
     if provenance_root is not None:
         result.usage = read_usage(paths)
+    result.capture_paths = [
+        path
+        for adapter in owned.values()
+        if isinstance(adapter, PersistentCommandAdapter)
+        for path in adapter.capture_paths
+    ]
     return result

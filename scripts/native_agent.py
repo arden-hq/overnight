@@ -58,7 +58,7 @@ def runtime_and_evidence(
         raise click.UsageError("pass --runtime for a host run or --container for a contained one")
     if runtime is None:
         return image_runtime, CONTAINER_EVIDENCE
-    return str(runtime.resolve()), str(out / "native")
+    return str(runtime.resolve()), str((out / "native").resolve())
 
 
 def harness_agent(

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { OperationView, ScenarioDetail } from "../api/types";
 import { arr, obj, str, type Json } from "../lib/run";
 import { clock } from "../lib/time";
@@ -529,9 +529,64 @@ const LAYER_KEYS = [
   { key: "forbidden", name: "Forbidden" },
 ] as const;
 
+const CHECK_OPS = ["eq", "match", "exists", "unchanged", "before"];
+const VALUE_OPS = ["eq", "match"];
+
+function checkTarget(check: Json): string {
+  return check.op === "before" ? `${text(check.first)} then ${text(check.then)}` : pathText(check.path);
+}
+
+const copy = (value: unknown): unknown => JSON.parse(JSON.stringify(value));
+const isPattern = (value: unknown) => typeof value === "object" && value !== null && !Array.isArray(value) && Object.keys(value).length > 0;
+
+/** Switch a check to another test so the result is a check the contract accepts. Fields the new
+ * test cannot hold go to ``stash`` and come back when a later switch needs them again. */
+function setCheckOp(check: Json, op: string | undefined, stash: Json) {
+  const from = check.op;
+  if (from === "before") {
+    for (const key of ["first", "then"]) if (check[key] !== undefined) stash[key] = copy(check[key]);
+  } else {
+    stash.source = check.source ?? "state";
+    for (const key of ["path", "value"]) if (check[key] !== undefined) stash[key] = copy(check[key]);
+  }
+  const take = (key: string) => {
+    if (check[key] === undefined && stash[key] !== undefined) check[key] = copy(stash[key]);
+  };
+  check.op = op;
+  if (op === "before") {
+    check.source = "trace";
+    delete check.path;
+    delete check.value;
+    take("first");
+    take("then");
+    check.first ??= { kind: "invocation" };
+    check.then ??= { kind: "invocation" };
+    return;
+  }
+  if (from === "before") {
+    delete check.first;
+    delete check.then;
+    if (stash.source !== undefined) put(check, "source", stash.source === "state" ? undefined : stash.source);
+  }
+  if (op === "unchanged") delete check.source;
+  take("path");
+  check.path ??= check.source === undefined || check.source === "state" ? ["services"] : [];
+  if (VALUE_OPS.includes(op ?? "")) {
+    take("value");
+    check.value ??= null;
+  } else delete check.value;
+}
+
 export function ChecksSection({ doc, edit }: Props) {
   const tasks = arr(doc.tasks).map(obj);
   const [scope, setScope] = useState<string>("scenario");
+  // Fields a check gave up when its test changed, by scope, layer and index; cleared on removal.
+  const stashes = useRef(new Map<string, Json>());
+  const stash = (key: string, i: number) => {
+    const id = `${scope}/${key}/${i}`;
+    if (!stashes.current.has(id)) stashes.current.set(id, {});
+    return stashes.current.get(id) as Json;
+  };
   const taskIndex = tasks.findIndex((t) => str(t.id) === scope);
   const checks = obj(taskIndex >= 0 ? tasks[taskIndex].checks : doc.checks);
   const target = (d: Json) => child(taskIndex >= 0 ? list(d, "tasks")[taskIndex] : d, "checks");
@@ -556,7 +611,10 @@ export function ChecksSection({ doc, edit }: Props) {
             addLabel={`Add ${name.toLowerCase()} check`}
             itemName={(c, i) => str(c.label) ?? `${name.toLowerCase()} check ${i + 1}`}
             onAdd={() => edit((d) => void list(target(d), key).push(forbidden ? { match: { kind: "invocation" } } : { op: "exists", path: ["services"] }))}
-            onRemove={(i) => edit((d) => void list(target(d), key).splice(i, 1))}
+            onRemove={(i) => {
+              stashes.current.clear();
+              edit((d) => void list(target(d), key).splice(i, 1));
+            }}
             columns={
               forbidden
                 ? [
@@ -566,9 +624,9 @@ export function ChecksSection({ doc, edit }: Props) {
                 : [
                     { head: "Label", width: "30%", cell: (c) => str(c.label) ?? <span className="muted">No label</span> },
                     { head: "Source", width: 104, cell: (c) => (str(c.source) ?? "state").replace(/_/g, " ") },
-                    { head: "Path", mono: true, cell: (c) => pathText(c.path), title: (c) => pathText(c.path) },
+                    { head: "Path", mono: true, cell: (c) => checkTarget(c), title: (c) => checkTarget(c) },
                     { head: "Test", width: 84, cell: (c) => str(c.op) },
-                    { head: "Value", width: "18%", mono: true, cell: (c) => (c.op === "eq" ? text(c.value) : ""), title: (c) => text(c.value) },
+                    { head: "Value", width: "18%", mono: true, cell: (c) => (VALUE_OPS.includes(str(c.op) ?? "") ? text(c.value) : ""), title: (c) => text(c.value) },
                   ]
             }
             form={(c, i) => (
@@ -583,28 +641,36 @@ export function ChecksSection({ doc, edit }: Props) {
                 ) : (
                   <>
                     <Field label="Source">
-                      <Choice label="Source" value={c.source ?? "state"} options={["state", "trace", "agent_report"]} onChange={(v) => editCheck(i, (x) => put(x, "source", v === "state" && x.source === undefined ? undefined : v))} />
+                      <Choice label="Source" value={c.op === "before" ? "trace" : (c.source ?? "state")} options={c.op === "before" ? ["trace"] : c.op === "unchanged" ? ["state"] : ["state", "trace", "agent_report"]} onChange={(v) => editCheck(i, (x) => put(x, "source", v === "state" && x.source === undefined ? undefined : v))} />
                     </Field>
                     <Field label="Test">
                       <Choice
                         label="Test"
                         value={c.op}
-                        options={["eq", "exists", "unchanged"]}
-                        onChange={(v) =>
-                          editCheck(i, (x) => {
-                            x.op = v;
-                            if (v === "eq" && !("value" in x)) x.value = null;
-                            if (v !== "eq") delete x.value;
-                          })
-                        }
+                        options={CHECK_OPS}
+                        onChange={(v) => {
+                          const kept = stash(key, i);
+                          editCheck(i, (x) => setCheckOp(x, v, kept));
+                        }}
                       />
                     </Field>
-                    <Field label="Path" wide>
-                      <PathInput label="Path" value={c.path} onChange={(v) => editCheck(i, (x) => put(x, "path", v))} />
-                    </Field>
-                    {c.op === "eq" && (
-                      <Field label="Equals" wide>
-                        <JsonField label="Equals" value={c.value} onChange={(v) => editCheck(i, (x) => put(x, "value", v === undefined ? null : v))} />
+                    {c.op === "before" ? (
+                      <>
+                        <Field label="First" wide>
+                          <JsonField label="First" rows={3} value={c.first} onChange={(v) => isPattern(v) && editCheck(i, (x) => put(x, "first", v))} />
+                        </Field>
+                        <Field label="Then" wide>
+                          <JsonField label="Then" rows={3} value={c.then} onChange={(v) => isPattern(v) && editCheck(i, (x) => put(x, "then", v))} />
+                        </Field>
+                      </>
+                    ) : (
+                      <Field label="Path" wide>
+                        <PathInput label="Path" value={c.path} onChange={(v) => editCheck(i, (x) => put(x, "path", v))} />
+                      </Field>
+                    )}
+                    {VALUE_OPS.includes(str(c.op) ?? "") && (
+                      <Field label={c.op === "match" ? "Contains" : "Equals"} wide>
+                        <JsonField label={c.op === "match" ? "Contains" : "Equals"} rows={c.op === "match" ? 3 : 1} value={c.value} onChange={(v) => editCheck(i, (x) => put(x, "value", v === undefined ? null : v))} />
                       </Field>
                     )}
                   </>

@@ -50,6 +50,7 @@ class CaseResult(ReportModel):
     passes: int
     scored: int
     outcomes: list[AttemptOutcome]
+    scores: list[float | None]
 
 
 class LeaderComparison(ReportModel):
@@ -64,6 +65,7 @@ class ArmReport(ReportModel):
     arm_id: str
     ranked: bool
     mean: float | None
+    score: float | None
     interval: tuple[float, float] | None
     pass_all: float | None
     pass_any: float | None
@@ -87,6 +89,27 @@ class SuiteReport(ReportModel):
 
 def _pass_values(outcomes: Sequence[AttemptOutcome]) -> list[int]:
     return [1 if outcome == "passed" else 0 for outcome in outcomes if outcome in SCORED]
+
+
+def _case_scores(
+    outcomes: Sequence[AttemptOutcome], scores: Sequence[float | None] | None
+) -> list[float | None]:
+    if scores is None:
+        return [None] * len(outcomes)
+    return [
+        value if outcome in SCORED else None
+        for outcome, value in zip(outcomes, scores, strict=True)
+    ]
+
+
+def _score_mean(cells: Sequence[Sequence[float | None]]) -> float | None:
+    means: list[float] = []
+    for cell in cells:
+        values = [value for value in cell if value is not None]
+        if not values:
+            return None
+        means.append(sum(values) / len(values))
+    return sum(means) / len(means) if means else None
 
 
 def rerun_flip(values: Sequence[int]) -> float | None:
@@ -175,6 +198,7 @@ def summarize_suite(
     outcomes: Mapping[tuple[str, str], Sequence[AttemptOutcome]],
     retries: Mapping[str, int] | None = None,
     spend: Mapping[str, ArmSpend] | None = None,
+    scores: Mapping[tuple[str, str], Sequence[float | None]] | None = None,
 ) -> SuiteReport:
     case_ids = [case.id for case in suite.cases]
     values = {
@@ -184,6 +208,13 @@ def summarize_suite(
         arm: cells
         for arm, cells in values.items()
         if all(len(cell) == suite.attempts for cell in cells)
+    }
+    score_cells = {
+        arm.id: [
+            _case_scores(outcomes[arm.id, case], (scores or {}).get((arm.id, case)))
+            for case in case_ids
+        ]
+        for arm in suite.arms
     }
     rates = {arm: [sum(cell) / len(cell) for cell in cells] for arm, cells in ranked.items()}
     means = {arm: sum(cases) / len(cases) for arm, cases in rates.items()}
@@ -226,6 +257,7 @@ def summarize_suite(
                 arm_id=arm.id,
                 ranked=statistics_known,
                 mean=means.get(arm.id),
+                score=_score_mean(score_cells[arm.id]) if statistics_known else None,
                 interval=_interval(samples[arm.id]) if arm.id in samples else None,
                 pass_all=_cell_mean(cells, pass_all, suite.attempts) if statistics_known else None,
                 pass_any=_cell_mean(cells, pass_any, suite.attempts) if statistics_known else None,
@@ -246,8 +278,11 @@ def summarize_suite(
                         passes=sum(cell),
                         scored=len(cell),
                         outcomes=list(items),
+                        scores=case_scores,
                     )
-                    for case, cell, items in zip(case_ids, cells, all_outcomes, strict=True)
+                    for case, cell, items, case_scores in zip(
+                        case_ids, cells, all_outcomes, score_cells[arm.id], strict=True
+                    )
                 ],
             )
         )
@@ -267,6 +302,7 @@ def render_report(report: SuiteReport) -> str:
     headers = (
         "arm",
         "mean",
+        "score",
         "95% interval",
         f"pass^{report.attempts}",
         "flip",
@@ -282,6 +318,7 @@ def render_report(report: SuiteReport) -> str:
             (
                 arm.arm_id,
                 _number(arm.mean),
+                _number(arm.score),
                 f"{_number(arm.interval[0])} to {_number(arm.interval[1])}"
                 if arm.interval is not None
                 else ("too few cases" if arm.ranked else "not ranked"),
