@@ -277,31 +277,32 @@ class World:
         except ValueError:
             return args
 
-    def read_args(self, invocation: Invocation) -> object:
-        """An agent call's arguments as its operation would read them: references resolved
-        where they can be, then `canonical_args`. For a call that never reaches the world."""
+    def read_args(self, invocation: Invocation, trusted_event: bool = False) -> object:
+        """A call's arguments as its operation would read them: references resolved where they
+        can be, then `canonical_args`. Every trace entry of a call records this one value,
+        whether the call ran, failed or never reached the world."""
         args: object = invocation.args
         try:
-            args = resolve_references(
+            resolved = resolve_references(
                 invocation.args,
                 (invocation.actor_id, invocation.chat_id),
-                False,
+                trusted_event,
                 self._results,
                 self._result_owners,
             )
         except ValueError, PermissionError:
-            pass
+            resolved = None
+        if isinstance(resolved, dict):
+            args = resolved
         return self.canonical_args(invocation.service_id, invocation.operation, args)
 
-    def _record_invocation(
-        self, invocation: Invocation, args: object, event_id: str | None
-    ) -> None:
+    def _record_invocation(self, invocation: Invocation, event_id: str | None) -> None:
         self.record(
             "invocation",
             {
                 "service_id": invocation.service_id,
                 "operation": invocation.operation,
-                "args": self.canonical_args(invocation.service_id, invocation.operation, args),
+                "args": self.read_args(invocation, event_id is not None),
                 "requested_args": invocation.args,
             },
             actor_id=invocation.actor_id,
@@ -336,7 +337,7 @@ class World:
             args = resolved
             return Invocation.model_validate({**invocation.model_dump(mode="json"), "args": args})
         finally:
-            self._record_invocation(invocation, args, event_id)
+            self._record_invocation(invocation, event_id)
 
     def _apply_operation(
         self, invocation: Invocation, actor: Actor, event_id: str | None
