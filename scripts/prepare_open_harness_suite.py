@@ -65,6 +65,7 @@ CASES = [
     ),
     ("shared-world", "shared-world-chaos.json", None, None),
     ("shared-world-noise", "shared-world-chaos.json", None, "shared-world-chaos-variation.json"),
+    ("offsite-week", "offsite-week.json", None, None),
 ]
 
 
