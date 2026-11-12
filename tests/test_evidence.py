@@ -116,6 +116,34 @@ def test_trace_outcomes_ignore_denied_attempts_that_forbidden_checks_still_see()
     assert evaluate(checks, {}, [*trace[:2], succeeded], "done")["outcomes"] == [True]
 
 
+def test_a_check_with_by_counts_only_evidence_up_to_that_time():
+    def sent_by(by: int | None) -> JsonObject:
+        check: JsonObject = {
+            "source": "trace",
+            "op": "eq",
+            "path": ["payload", "operation"],
+            "value": "send",
+        }
+        said: JsonObject = {"source": "agent_report", "op": "match", "path": [], "value": {}}
+        return {"outcomes": [check | {"by": by}, said | {"by": by}] if by else [check, said]}
+
+    trace: list[JsonObject] = [
+        {"sequence": 0, "time": 9, "kind": "invocation", "payload": {"operation": "send"}},
+        {
+            "sequence": 1,
+            "time": 12,
+            "kind": "agent_report",
+            "payload": {"time": 12, "message": "x"},
+        },
+    ]
+
+    assert evaluate(sent_by(None), {}, trace, "done")["outcomes"] == [True, True]
+    assert evaluate(sent_by(9), {}, trace, "done")["outcomes"] == [True, False]
+    assert evaluate(sent_by(8), {}, trace, "done")["outcomes"] == [False, False]
+    with pytest.raises(ValidationError, match="by needs trace or agent_report"):
+        Checks.model_validate({"outcomes": [{"op": "exists", "path": ["services"], "by": 5}]})
+
+
 def test_an_order_check_needs_the_first_effect_before_the_earliest_second_one():
     def call(sequence: int, operation: str, status: str = "succeeded") -> list[JsonObject]:
         invocation_id = f"call-{sequence}"

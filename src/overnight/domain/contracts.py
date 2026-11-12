@@ -401,17 +401,27 @@ class CheckLabel(Contract):
     label: TrimmedText | None = None
 
 
-class EqualsCheck(CheckLabel):
+class EvidenceCheck(CheckLabel):
+    """``by`` keeps only trace entries or agent reports made at or before that world time."""
+
     source: Literal["state", "trace", "agent_report"] = "state"
-    op: Literal["eq", "match"]
     path: Path
+    by: Nonnegative | None = None
+
+    @model_validator(mode="after")
+    def validate_by(self) -> Self:
+        if self.by is not None and self.source == "state":
+            raise ValueError("by needs trace or agent_report evidence; state is the final state")
+        return self
+
+
+class EqualsCheck(EvidenceCheck):
+    op: Literal["eq", "match"]
     value: JsonValue
 
 
-class PresenceCheck(CheckLabel):
-    source: Literal["state", "trace", "agent_report"] = "state"
+class PresenceCheck(EvidenceCheck):
     op: Literal["exists", "unchanged"]
-    path: Path
 
     @model_validator(mode="after")
     def validate_source(self) -> Self:

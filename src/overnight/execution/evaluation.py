@@ -60,9 +60,17 @@ def _check(
         return _in_order(check, trace)
     if check.source == "state":
         return _check_value(check, snapshot, initial)
-    if check.source == "trace":
-        return any(_check_value(check, entry, initial) for entry in trace)
-    return any(_check_value(check, report, initial) for report in reports)
+    evidence = trace if check.source == "trace" else reports
+    return any(
+        _check_value(check, entry, initial) for entry in evidence if _in_time(entry, check.by)
+    )
+
+
+def _in_time(entry: JsonObject, by: int | None) -> bool:
+    if by is None:
+        return True
+    time = entry.get("time")
+    return type(time) is int and time <= by
 
 
 def _committed(trace: list[JsonObject]) -> list[JsonObject]:
