@@ -13,7 +13,7 @@ from starlette.applications import Starlette
 from starlette.routing import Route
 
 from overnight.adapters.http import serve_http
-from overnight.domain.contracts import Contract, Fact, JsonObject, Text
+from overnight.domain.contracts import Contract, Fact, JsonObject, TrimmedText
 
 NATIVE_CONTEXT_KEY = "arden/execution"
 
@@ -25,11 +25,11 @@ class TrustedToolContext(Fact):
     ID for each operation and record a trusted native parent when available.
     """
 
-    run_id: Text
-    tool_call_id: Text
-    chat_id: Text
+    run_id: TrimmedText
+    tool_call_id: TrimmedText
+    chat_id: TrimmedText
     identity_source: Literal["native", "adapter"] = "native"
-    parent_call_id: Text | None = None
+    parent_call_id: TrimmedText | None = None
 
     @classmethod
     def for_operation(cls, run_id: str, chat_id: str, *, parent_call_id: str | None = None) -> Self:
@@ -44,7 +44,7 @@ class TrustedToolContext(Fact):
 
 
 class ToolOperation(Contract):
-    name: Text
+    name: TrimmedText
     description: str = ""
     input_schema: JsonObject
     read_only: bool = False

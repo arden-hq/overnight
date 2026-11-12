@@ -43,12 +43,14 @@ from overnight.domain.vocabulary import (
     RunStatus,
 )
 from overnight.execution.adapters import (
+    NO_TRAINING,
     ActionRejected,
     AdapterError,
     AgentAdapter,
     AgentBehaviorError,
     CommandAdapter,
     PersistentCommandAdapter,
+    Training,
     describe_failure,
     make_adapter,
     next_action,
@@ -921,8 +923,8 @@ def run_scenario(
     asks the agent's processes to store their model calls beside their sidecars in
     ``agent_folder``. ``policy_port`` (training only) lets a contained agent reach that one port
     of the host, where the trainer serves its policy, at ``policy_url``."""
-    training = capture or policy_port is not None
-    if training and (agent_folder is None or adapter is not None or adapters is not None):
+    training = Training(capture, policy_port)
+    if training.requested and (agent_folder is None or adapter is not None or adapters is not None):
         raise AdapterError("training needs an agent folder and adapters this run creates")
     if scenario.config.tasks:
         from overnight.execution.episode import run_episode
@@ -938,8 +940,7 @@ def run_scenario(
             adapters,
             agent_folder=agent_folder,
             operator_transport=operator_transport,
-            capture=capture,
-            policy_port=policy_port,
+            training=training,
         )
     if adapters is not None:
         raise AdapterError("per-chat adapters require a scenario with tasks")
@@ -949,7 +950,7 @@ def run_scenario(
         if agent_folder is not None:
             agent_folder.mkdir(mode=0o700)
             return _run_owned(
-                scenario, agent_folder / "connector.json", operator_transport, capture, policy_port
+                scenario, agent_folder / "connector.json", operator_transport, training
             )
         with TemporaryDirectory(prefix="overnight-provenance-") as directory:
             return _run_owned(scenario, Path(directory) / "connector.json", operator_transport)
@@ -960,11 +961,10 @@ def _run_owned(
     scenario: ResolvedScenario,
     provenance_path: Path | None,
     operator_transport: OperatorTransport | None,
-    capture: bool = False,
-    policy_port: int | None = None,
+    training: Training = NO_TRAINING,
 ) -> RunResult:
-    if capture or policy_port is not None:
-        owned = make_adapter(scenario.config.agent, provenance_path, capture, policy_port)
+    if training.requested:
+        owned = make_adapter(scenario.config.agent, provenance_path, training)
     elif provenance_path is not None:
         owned = make_adapter(scenario.config.agent, provenance_path)
     else:

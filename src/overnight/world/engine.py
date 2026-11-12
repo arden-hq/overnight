@@ -462,29 +462,35 @@ class World:
             raise ValueError("time must advance monotonically by integer seconds")
         produced: list[Result] = []
         while True:
-            dispatch = self._queue.next(
+            event = self._queue.next(
                 now=self.now, state_for=self._state_for, results=self._results, until=to
             )
-            times = [
-                time
-                for time in (
-                    dispatch.time if dispatch is not None else None,
-                    self._system.next_due(),
-                    self._notifications.next_until(),
-                )
-                if time is not None and time <= to
-            ]
-            if not times:
+            time = self._next_time_with_work(event, to)
+            if time is None:
                 break
-            time = max(self.now, min(times))
-            if dispatch is not None and dispatch.time == time:
-                produced.append(self._dispatch(dispatch))
+            if event is not None and event.time == time:
+                produced.append(self._dispatch(event))
                 continue
-            self.now = time
-            self._fire_reminders()
-            self._settle()
+            self._fire_reminders_then_settle_waits(time)
         self.now = to
         return tuple(produced)
+
+    def _next_time_with_work(self, event: Dispatch | None, to: int) -> int | None:
+        times = [
+            time
+            for time in (
+                event.time if event is not None else None,
+                self._system.next_due(),
+                self._notifications.next_until(),
+            )
+            if time is not None and time <= to
+        ]
+        return max(self.now, min(times)) if times else None
+
+    def _fire_reminders_then_settle_waits(self, time: int) -> None:
+        self.now = time
+        self._fire_reminders()
+        self._settle()
 
     def _dispatch(self, dispatch: Dispatch) -> Result:
         event = dispatch.scheduled.event

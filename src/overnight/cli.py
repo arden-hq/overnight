@@ -266,7 +266,7 @@ def generate_cases(family: str, count: int, seed: int, out: Path) -> int:
     except FamilyError as error:
         raise click.ClickException(str(error)) from error
     parent = out.absolute().parent
-    created = [path for path in (parent, *parent.parents) if not path.exists()]
+    created = _missing_directories_deepest_first(parent)
     staging: Path | None = None
     try:
         try:
@@ -287,14 +287,22 @@ def generate_cases(family: str, count: int, seed: int, out: Path) -> int:
     except BaseException:
         if staging is not None:
             shutil.rmtree(staging, ignore_errors=True)
-        for path in created:
-            try:
-                path.rmdir()
-            except OSError:
-                break
+        _remove_directories_until_one_is_not_empty(created)
         raise
     click.echo(f"wrote {len(cases)} cases to {out}")
     return 0
+
+
+def _missing_directories_deepest_first(directory: Path) -> list[Path]:
+    return [path for path in (directory, *directory.parents) if not path.exists()]
+
+
+def _remove_directories_until_one_is_not_empty(deepest_first: list[Path]) -> None:
+    for path in deepest_first:
+        try:
+            path.rmdir()
+        except OSError:
+            break
 
 
 def _write_cases(out: Path, family: str, cases: list[Case]) -> None:

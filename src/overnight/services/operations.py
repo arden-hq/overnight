@@ -8,7 +8,7 @@ from jsonschema import Draft202012Validator, validators
 from jsonschema import ValidationError as SchemaError
 from pydantic import ValidationError
 
-from overnight.domain.contracts import Contract, Invocation, JsonObject, Reference, Text
+from overnight.domain.contracts import Contract, Invocation, JsonObject, Reference, TrimmedText
 from overnight.domain.immutable import FrozenObject
 from overnight.domain.models import Actor, Context, Transition
 from overnight.domain.values import json_object
@@ -30,7 +30,7 @@ class NoArguments(Parameters):
 
 
 class IdArgument(Parameters):
-    id: Text
+    id: TrimmedText
 
 
 def _allow_reference(validator: Callable) -> Callable:
@@ -46,12 +46,14 @@ def _allow_reference(validator: Callable) -> Callable:
     return validate
 
 
+def _is_integer_not_whole_float(_checker: object, value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 TemplateValidator = validators.extend(
     Draft202012Validator,
     {name: _allow_reference(check) for name, check in Draft202012Validator.VALIDATORS.items()},
-    type_checker=Draft202012Validator.TYPE_CHECKER.redefine(
-        "integer", lambda _, value: isinstance(value, int) and not isinstance(value, bool)
-    ),
+    type_checker=Draft202012Validator.TYPE_CHECKER.redefine("integer", _is_integer_not_whole_float),
 )
 
 

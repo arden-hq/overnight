@@ -35,8 +35,8 @@ from openenv.core.harness.capture.upstream import training_sampling
 from overnight_openenv.cases import Case, family_cases, overnight_python
 
 POLICY_KEY = "OVERNIGHT_POLICY_KEY"
-STOP_SECONDS = 20.0
-OPENROUTER_KEY = "OPENROUTER_API_KEY"
+INTERRUPT_GRACE_SECONDS = 20.0
+OPENROUTER_PRESET_KEY_VARIABLE = "OPENROUTER_API_KEY"
 EPISODE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 
@@ -45,7 +45,7 @@ class OvernightError(RuntimeError):
     engine failed under it. TRL scores the rollout as unscorable and drops it."""
 
 
-class InFlight:
+class UnansweredCallsByKey:
     def __init__(self, app: Any) -> None:
         self.app = app
         self.open: Counter[str] = Counter()
@@ -60,7 +60,7 @@ class InFlight:
             name.decode("latin-1"): value.decode("latin-1") for name, value in scope["headers"]
         }
         key = extract_api_key(headers) or ""
-        answered = False
+        answer_reached_client = False
         disconnected = asyncio.Event()
         watcher: asyncio.Task[None] | None = None
 
@@ -81,9 +81,9 @@ class InFlight:
             return message
 
         async def sending(message: Any) -> None:
-            nonlocal answered
+            nonlocal answer_reached_client
             if message["type"] == "http.response.body" and not message.get("more_body"):
-                answered = not disconnected.is_set()
+                answer_reached_client = not disconnected.is_set()
             await send(message)
 
         with self.lock:
@@ -95,22 +95,31 @@ class InFlight:
                 watcher.cancel()
             with self.lock:
                 self.open[key] -= 1
-                if disconnected.is_set() and not answered:
+                if disconnected.is_set() and not answer_reached_client:
                     self.abandoned[key] += 1
 
     def unanswered(self, key: str) -> int:
         with self.lock:
             return max(0, self.open[key]) + self.abandoned[key]
 
+    def forget(self, key: str) -> None:
+        with self.lock:
+            self.abandoned.pop(key, None)
+            if self.open[key] <= 0:
+                del self.open[key]
+
 
 class CaptureProxy:
+    """OpenEnv's capture proxy on a loopback port of this process. Its session routes are closed
+    by a random admin key; this process reads the registry directly."""
+
     def __init__(self, *, max_output_tokens: int | None) -> None:
         self.app = create_app(admin_key=secrets.token_hex(16), max_output_tokens=max_output_tokens)
-        self.in_flight = InFlight(self.app)
+        self.unanswered_calls = UnansweredCallsByKey(self.app)
         listener = socket.socket()
         listener.bind(("127.0.0.1", 0))
         self.port: int = listener.getsockname()[1]
-        self._server = uvicorn.Server(uvicorn.Config(self.in_flight, log_level="warning"))
+        self._server = uvicorn.Server(uvicorn.Config(self.unanswered_calls, log_level="warning"))
         self._thread = threading.Thread(
             target=self._server.run, kwargs={"sockets": [listener]}, daemon=True
         )
@@ -132,10 +141,7 @@ class CaptureProxy:
 
     def close(self, session: Session) -> None:
         self.app.state.registry.delete(session.session_id)
-        with self.in_flight.lock:
-            self.in_flight.abandoned.pop(session.session_id, None)
-            if self.in_flight.open[session.session_id] <= 0:
-                del self.in_flight.open[session.session_id]
+        self.unanswered_calls.forget(session.session_id)
 
     def stop(self) -> None:
         self._server.should_exit = True
@@ -145,7 +151,7 @@ class CaptureProxy:
 def operator_key_variable(operator_model: dict[str, Any]) -> str:
     provider = operator_model.get("provider", "openrouter")
     if provider == "openrouter":
-        return OPENROUTER_KEY
+        return OPENROUTER_PRESET_KEY_VARIABLE
     if isinstance(provider, dict) and isinstance(provider.get("api_key_env"), str):
         return provider["api_key_env"]
     raise ValueError("operator_model.provider must be 'openrouter' or name its api_key_env")
@@ -189,7 +195,7 @@ class OvernightSession(ResourceSession):
         self.result: dict[str, Any] = {}
 
     def initial_messages(self) -> list[Message]:
-        return [{"role": "user", "content": self.case.id}]
+        return _case_id_as_prompt(self.case.id)
 
     def list_tools(self) -> list[Tool]:
         return []
@@ -210,7 +216,7 @@ class OvernightSession(ResourceSession):
             self._closed = True
             process = self._process
         if process is not None:
-            _stop(process)
+            _interrupt_then_kill_group(process)
         self._proxy.close(self._capture)
 
     def wait_for_completion(self, timeout_s: float | None = None) -> int:
@@ -222,7 +228,7 @@ class OvernightSession(ResourceSession):
         if result is None:
             self.result = {"episode": self._request["id"], "timed_out": True}
             self.reward = 0.0
-            if self._trainable() is None:
+            if self._untrainable_reason() is None:
                 raise TimeoutError(f"the agent ran past {self._timeout_s} seconds")
             return 1
         if "error" in result:
@@ -247,13 +253,13 @@ class OvernightSession(ResourceSession):
             raise OvernightError(f"Overnight returned no score (verdict {result['verdict']})")
         if not self._capture.graph.stats()["n_turns"]:
             raise OvernightError("the episode was graded but no policy call reached the proxy")
-        problem = self._trainable()
+        problem = self._untrainable_reason()
         if problem is not None:
             raise OvernightError(f"the capture cannot be trained on: {problem}")
         self.reward = float(result["score"])
         return 0
 
-    def _trainable(self) -> str | None:
+    def _untrainable_reason(self) -> str | None:
         try:
             self.fetch_training_trace()
         except (ValueError, TypeError, KeyError) as error:
@@ -282,17 +288,17 @@ class OvernightSession(ResourceSession):
         try:
             stdout, stderr = process.communicate(line, timeout=timeout_s)
         except subprocess.TimeoutExpired:
-            unanswered = self._proxy.in_flight.unanswered(self._capture.session_id)
-            _stop(process, drain=True)
+            unanswered = self._proxy.unanswered_calls.unanswered(self._capture.session_id)
+            _interrupt_then_kill_group(process, drain_pipes=True)
             if unanswered:
                 raise OvernightError(
                     f"the deadline passed with {unanswered} policy call(s) at the engine"
                 ) from None
             return None
         except BaseException:
-            _stop(process, drain=True)
+            _interrupt_then_kill_group(process, drain_pipes=True)
             raise
-        unanswered = self._proxy.in_flight.unanswered(self._capture.session_id)
+        unanswered = self._proxy.unanswered_calls.unanswered(self._capture.session_id)
         if unanswered:
             raise OvernightError(f"the episode ended with {unanswered} policy call(s) unanswered")
         lines = stdout.decode().strip().splitlines()
@@ -304,14 +310,14 @@ class OvernightSession(ResourceSession):
         return json.loads(lines[-1])
 
 
-def _stop(process: subprocess.Popen[bytes], drain: bool = False) -> None:
+def _interrupt_then_kill_group(process: subprocess.Popen[bytes], drain_pipes: bool = False) -> None:
     if process.poll() is not None:
         return
     with contextlib.suppress(ProcessLookupError):
         process.send_signal(signal.SIGINT)
-    finish = process.communicate if drain else process.wait
+    finish = process.communicate if drain_pipes else process.wait
     try:
-        finish(timeout=STOP_SECONDS)
+        finish(timeout=INTERRUPT_GRACE_SECONDS)
     except subprocess.TimeoutExpired:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGKILL)
@@ -414,8 +420,7 @@ class OvernightSessionFactory(ResourceSessionFactory[OvernightSession]):
         """Dataset rows for TRL: the case id as the prompt, which `create` reads back. The agent
         never sees it."""
         return [
-            {"prompt": [{"role": "user", "content": case_id}], "case_id": case_id}
-            for case_id in self.cases()
+            {"prompt": _case_id_as_prompt(case_id), "case_id": case_id} for case_id in self.cases()
         ]
 
     def proxy(self) -> CaptureProxy:
@@ -435,7 +440,7 @@ class OvernightSessionFactory(ResourceSessionFactory[OvernightSession]):
     def create(
         self, task: Any, seed: int | None = None, episode_id: str | None = None
     ) -> OvernightSession:
-        case = self.cases()[_case_id(task)]
+        case = self.cases()[_case_id_from_prompt(task)]
         proxy = self.proxy()
         engine_key = os.environ.get(self.engine_api_key_env) if self.engine_api_key_env else None
         capture = proxy.open(
@@ -474,7 +479,11 @@ class OvernightSessionFactory(ResourceSessionFactory[OvernightSession]):
         )
 
 
-def _case_id(task: Any) -> str:
+def _case_id_as_prompt(case_id: str) -> list[Message]:
+    return [{"role": "user", "content": case_id}]
+
+
+def _case_id_from_prompt(task: Any) -> str:
     if isinstance(task, list) and task and isinstance(task[-1], dict):
         return str(task[-1].get("content") or "")
     if isinstance(task, dict):

@@ -43,9 +43,9 @@ def _reject_explicit_null(value: object) -> object:
 
 
 type Omittable[T] = Annotated[T | SkipJsonSchema[None], BeforeValidator(_reject_explicit_null)]
-Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, pattern=r"\S")]
-Body = Annotated[str, StringConstraints(strip_whitespace=True)]
-Names = list[Text]
+TrimmedText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, pattern=r"\S")]
+TrimmedBody = Annotated[str, StringConstraints(strip_whitespace=True)]
+Names = list[TrimmedText]
 NonemptyNames = Annotated[Names, Field(min_length=1)]
 
 
@@ -53,9 +53,9 @@ def sort_names(names: list[str] | None) -> list[str] | None:
     return None if names is None else sorted(names)
 
 
-NameSet = Annotated[Names, AfterValidator(sort_names)]
-NonemptyNameSet = Annotated[NonemptyNames, AfterValidator(sort_names)]
-OmittableNameSet = Annotated[Omittable[Names], AfterValidator(sort_names)]
+SortedNames = Annotated[Names, AfterValidator(sort_names)]
+NonemptySortedNames = Annotated[NonemptyNames, AfterValidator(sort_names)]
+OmittableSortedNames = Annotated[Omittable[Names], AfterValidator(sort_names)]
 
 
 class Contract(BaseModel):
@@ -315,9 +315,9 @@ class OperatorBrief(Contract):
     """What the user wants, knows and prefers for one task. Private: never in an observation."""
 
     task_id: Name | None = None
-    wants: Text
-    knows: list[Text] = Field(default_factory=list)
-    prefers: list[Text] = Field(default_factory=list)
+    wants: TrimmedText
+    knows: list[TrimmedText] = Field(default_factory=list)
+    prefers: list[TrimmedText] = Field(default_factory=list)
 
 
 type Rate = Annotated[float, Field(ge=0, le=1000)]
@@ -338,7 +338,7 @@ class OperatorModel(Contract):
 
 
 class OperatorPersona(Contract):
-    description: Text
+    description: TrimmedText
     briefs: Annotated[list[OperatorBrief], Field(min_length=1)]
     model: OperatorModel = Field(default_factory=OperatorModel)
 
@@ -382,7 +382,7 @@ class Reply(Contract):
 
     kind: Literal["reply"]
     request_id: Name
-    message: Text | None = None
+    message: TrimmedText | None = None
 
 
 class Decision(Contract):
@@ -391,14 +391,14 @@ class Decision(Contract):
     kind: Literal["decision"]
     request_id: Name
     decision: Literal[ApprovalDecision.APPROVE, ApprovalDecision.DENY]
-    message: Text | None = None
+    message: TrimmedText | None = None
 
 
 type OperatorAnswer = Annotated[Reply | Decision, Field(discriminator="kind")]
 
 
 class CheckLabel(Contract):
-    label: Text | None = None
+    label: TrimmedText | None = None
 
 
 class EqualsCheck(CheckLabel):
@@ -498,7 +498,7 @@ class Actor(Fact):
 
 class ServiceConfig(Contract):
     id: Name
-    kind: Text
+    kind: TrimmedText
     state: JsonObject
 
 
@@ -522,7 +522,7 @@ class Notification(Fact):
     kind: Annotated[NotificationKind, Field(strict=False)]
     service_id: Name | None
     ref: Name | None = None
-    summary: Text
+    summary: TrimmedText
     chat_id: Name | None = None
 
 

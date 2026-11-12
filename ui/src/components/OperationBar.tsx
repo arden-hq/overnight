@@ -9,6 +9,7 @@ import { useCatalog } from "../lib/api";
 import { go, href, parse } from "../lib/router";
 import { adoptOperation, dismissOperation, runBlocker, startRun, stopRun, useOperation } from "../lib/operation";
 import { cn } from "@/lib/utils";
+import { HintEvenWhenDisabled } from "./Hint";
 import { Icon } from "./Icon";
 
 const STATE_WORD = { running: "Running", finished: "Finished", failed: "Failed", stopped: "Stopped" } as const;
@@ -41,17 +42,7 @@ export function RunButton({ scenario, dirty, compact }: { scenario: ScenarioSumm
       {!compact && "Run"}
     </Button>
   );
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        {/* A disabled button gets no pointer events; the span carries the tooltip. */}
-        <span className="inline-flex" onClick={(e) => e.stopPropagation()}>
-          {button}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{blocker ?? `Run ${scenario?.id ?? ""}`}</TooltipContent>
-    </Tooltip>
-  );
+  return <HintEvenWhenDisabled label={blocker ?? `Run ${scenario?.id ?? ""}`}>{button}</HintEvenWhenDisabled>;
 }
 
 export function OperationBar() {

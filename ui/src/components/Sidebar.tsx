@@ -6,6 +6,7 @@ import { runPath, runsOf, scenarioOfRun, useCatalog, useResource } from "../lib/
 import { openPeek, usePeek } from "../lib/peek";
 import { go, href, SECTIONS, type Route, type Section } from "../lib/router";
 import { isVariant, runTitle, servicesOf, summaryStatus } from "../lib/run";
+import { readStorageIfAllowed, writeStorageIfAllowed } from "../lib/tolerant";
 import { agentViews, SHAPE_VIEWS, useRecent, VIEWS, viewHref, visit, type ScenarioView } from "../lib/views";
 import { STATUS_ICON, STATUS_TONE, STATUS_WORD } from "../lib/verdict";
 import { Hint } from "./Hint";
@@ -25,11 +26,7 @@ const SECTION_META: Record<Section, { label: string; icon: string }> = {
 const RUN_LIMIT = 12;
 
 function readCollapsed(): boolean {
-  try {
-    return localStorage.getItem("overnight-sidebar") === "collapsed";
-  } catch {
-    return false;
-  }
+  return readStorageIfAllowed("overnight-sidebar") === "collapsed";
 }
 
 function Item({ href: to, onClick, icon, label, on, collapsed, trailing, className }: { href?: string; onClick?: () => void; icon?: React.ReactNode; label: string; on?: boolean; collapsed: boolean; trailing?: React.ReactNode; className?: string }) {
@@ -56,10 +53,7 @@ function Item({ href: to, onClick, icon, label, on, collapsed, trailing, classNa
 export function Sidebar({ route, view, theme, onTheme }: { route: Route; view: ScenarioView; theme: string; onTheme: () => void }) {
   const [collapsed, setCollapsed] = useState(readCollapsed);
   useEffect(() => {
-    try {
-      localStorage.setItem("overnight-sidebar", collapsed ? "collapsed" : "open");
-    } catch {
-    }
+    writeStorageIfAllowed("overnight-sidebar", collapsed ? "collapsed" : "open");
   }, [collapsed]);
   const { scenarios, runs } = useCatalog();
   const peek = usePeek();

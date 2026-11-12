@@ -12,6 +12,9 @@ def overnight_python() -> str:
 
 @dataclass(frozen=True)
 class Case:
+    """One generated case: its id and scenario document, with its checks. The scenario never
+    reaches the agent from here; Overnight's runner decides what the agent sees."""
+
     id: str
     scenario: dict[str, Any]
 

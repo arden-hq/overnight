@@ -17,6 +17,7 @@ from overnight.domain.contracts import (
 from overnight.domain.values import json_object, json_value
 from overnight.domain.vocabulary import RunStatus, Verdict
 from overnight.execution.adapters import (
+    NO_TRAINING,
     ActionRejected,
     AdapterError,
     AgentAdapter,
@@ -24,6 +25,7 @@ from overnight.execution.adapters import (
     ManagedAdapter,
     PersistentCommandAdapter,
     ResettableAgentAdapter,
+    Training,
     make_adapter,
 )
 from overnight.execution.evaluation import evaluate
@@ -394,17 +396,14 @@ def run_episode(
     *,
     agent_folder: Path | None = None,
     operator_transport: OperatorTransport | None = None,
-    capture: bool = False,
-    policy_port: int | None = None,
+    training: Training = NO_TRAINING,
 ) -> RunResult:
     if adapters is not None:
         return Episode(scenario, adapters, operator_transport).run()
     if isinstance(scenario.config.agent, (CommandAgent, HarnessAgent)):
         if agent_folder is not None:
             agent_folder.mkdir(mode=0o700)
-            return _run_owned_episode(
-                scenario, agent_folder, operator_transport, capture, policy_port
-            )
+            return _run_owned_episode(scenario, agent_folder, operator_transport, training)
         with TemporaryDirectory(prefix="overnight-episode-provenance-") as directory:
             return _run_owned_episode(scenario, Path(directory), operator_transport)
     return _run_owned_episode(scenario, None, operator_transport)
@@ -414,8 +413,7 @@ def _run_owned_episode(
     scenario: ResolvedScenario,
     provenance_root: Path | None,
     operator_transport: OperatorTransport | None,
-    capture: bool = False,
-    policy_port: int | None = None,
+    training: Training = NO_TRAINING,
 ) -> RunResult:
     owned: dict[str, ManagedAdapter] = {}
     trial: Episode | None = None
@@ -428,10 +426,8 @@ def _run_owned_episode(
                     if provenance_root is not None
                     else None
                 )
-                if capture or policy_port is not None:
-                    owned[task.chat_id] = make_adapter(
-                        scenario.config.agent, path, capture, policy_port
-                    )
+                if training.requested:
+                    owned[task.chat_id] = make_adapter(scenario.config.agent, path, training)
                 elif path is not None:
                     owned[task.chat_id] = make_adapter(scenario.config.agent, path)
                 else:

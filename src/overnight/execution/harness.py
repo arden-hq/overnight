@@ -15,10 +15,12 @@ from overnight.domain.contracts import (
     Notification,
 )
 from overnight.execution.adapters import (
+    NO_TRAINING,
     AdapterError,
     AgentBehaviorError,
     ContractError,
     PersistentCommandAdapter,
+    Training,
 )
 
 notifications_contract = TypeAdapter(list[Notification])
@@ -87,10 +89,9 @@ class HarnessAdapter(PersistentCommandAdapter):
         provenance_path,
         required: HarnessRequirements,
         container: AgentContainer | None = None,
-        capture: bool = False,
-        policy_port: int | None = None,
+        training: Training = NO_TRAINING,
     ):
-        super().__init__(command, timeout_seconds, provenance_path, container, capture, policy_port)
+        super().__init__(command, timeout_seconds, provenance_path, container, training)
         self.required = required
         self.capabilities: Capabilities | None = None
         self.status = HarnessStatus(pending=False)
@@ -107,18 +108,21 @@ class HarnessAdapter(PersistentCommandAdapter):
         self.process_chat_id = chat_id
         self.chat_id = chat_id
 
+    def _start_before_the_agent_decides_anything(self) -> JsonObject:
+        try:
+            return super().respond(
+                {
+                    "kind": "hello",
+                    "version": 1,
+                    "required": self.required.model_dump(mode="json"),
+                }
+            )
+        except AgentBehaviorError as error:
+            raise AdapterError(f"harness ended before it was ready: {error}") from error
+
     def _handshake(self) -> Capabilities:
         if self.capabilities is None:
-            try:
-                reply = super().respond(
-                    {
-                        "kind": "hello",
-                        "version": 1,
-                        "required": self.required.model_dump(mode="json"),
-                    }
-                )
-            except AgentBehaviorError as error:
-                raise AdapterError(f"harness ended before it was ready: {error}") from error
+            reply = self._start_before_the_agent_decides_anything()
             try:
                 ready = Ready.model_validate(reply)
                 ready.capabilities.require(self.required)

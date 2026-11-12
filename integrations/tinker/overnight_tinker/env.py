@@ -31,7 +31,8 @@ from tinker_cookbook.tokenizer_utils import get_tokenizer
 from overnight_tinker.cases import Case, has_persona
 
 POLICY_KEY = "OVERNIGHT_POLICY_KEY"
-STOP_SECONDS = 20.0
+INTERRUPT_GRACE_SECONDS = 20.0
+OUTERMOST_MIDDLEWARE = 0
 
 
 class OvernightError(Exception):
@@ -42,6 +43,8 @@ class OvernightError(Exception):
 
 @dataclass(frozen=True)
 class EpisodeConfig:
+    """Everything an episode needs, as plain picklable values."""
+
     python: str
     """Overnight's interpreter."""
     model_name: str
@@ -78,6 +81,10 @@ def operator_key(config: EpisodeConfig) -> str:
     return os.environ[name]
 
 
+def require_operator_key(config: EpisodeConfig) -> None:
+    operator_key(config)
+
+
 @cache
 def _renderer(model_name: str, renderer_name: str | None) -> renderers.Renderer:
     name = renderer_name or model_info.get_recommended_renderer_name(model_name)
@@ -108,7 +115,7 @@ class _Pending:
 
 
 @dataclass
-class _Bridge:
+class _SamplingClientAnsweredByEnv:
     requests: asyncio.Queue[_Pending] = field(default_factory=asyncio.Queue)
 
     async def sample(
@@ -152,6 +159,8 @@ def reward(result: dict[str, Any]) -> tuple[float, dict[str, float]]:
 
 
 class OvernightEnv(Env):
+    """One Overnight episode. Single use, as every cookbook env."""
+
     def __init__(self, config: EpisodeConfig, case: Case) -> None:
         self.config = config
         self.case = case
@@ -159,15 +168,15 @@ class OvernightEnv(Env):
         sampling = config.sampling_turn_timeout_seconds or config.rollout_timeout_seconds
         if sampling is not None:
             # Read by the cookbook's rollout loop: a sampling call past it raises, and the
-            # episode is dropped. The episode's own deadline is this env's (`_next`), so a
+            # episode is dropped. The episode's own deadline is this env's (`_next_policy_call`), so a
             # deadline that falls while the sampler works is never scored.
             self.rollout_limits = RolloutLimits(sampling_turn_timeout_seconds=sampling)
         self.result: dict[str, Any] | None = None
-        self._bridge = _Bridge()
+        self._sampling_client = _SamplingClientAnsweredByEnv()
         self._current: _Pending | None = None
         self._proxy_errors: list[str] = []
         self._deadline: float | None = None
-        self._timed_out = False
+        self._agent_ran_out_of_time = False
         self._runner: web.AppRunner | None = None
         self._process: asyncio.subprocess.Process | None = None
         self._worker: asyncio.Task[dict[str, Any]] | None = None
@@ -178,10 +187,9 @@ class OvernightEnv(Env):
     ) -> tuple[Observation, StopCondition] | InitialObservationOverflow:
         try:
             await self._start()
-            pending = await self._next()
+            pending = await self._next_policy_call()
             if pending is None:
-                score, metrics = self._final()
-                return InitialObservationOverflow(score, metrics)
+                return _ended_without_policy_call(*self._final())
             return pending.prompt, pending.stop
         except BaseException:
             self.close_soon()
@@ -196,7 +204,7 @@ class OvernightEnv(Env):
                 raise OvernightError("the episode's deadline passed while the sampler worked")
             stop_reason = (extra or {}).get("stop_reason", "stop")
             self._current.answer.set_result(_Response([_Sequence(action, stop_reason)]))
-            pending = await self._next()
+            pending = await self._next_policy_call()
             if pending is not None:
                 return StepResult(0.0, False, pending.prompt, pending.stop)
             score, metrics = self._final()
@@ -208,9 +216,11 @@ class OvernightEnv(Env):
     async def _start(self) -> None:
         renderer = _renderer(self.config.model_name, self.config.renderer_name)
         secret = token_hex(16)
-        deps = ProxyDeps(renderer=renderer, sampling_client=self._bridge, model_label="policy")
+        deps = ProxyDeps(
+            renderer=renderer, sampling_client=self._sampling_client, model_label="policy"
+        )
         app = make_app(deps, auth_token=secret)
-        app.middlewares.insert(0, self._watch)
+        app.middlewares.insert(OUTERMOST_MIDDLEWARE, self._record_unserved_request)
         self._runner = web.AppRunner(app, handler_cancellation=True)
         await self._runner.setup()
         await web.TCPSite(self._runner, "127.0.0.1", 0).start()
@@ -228,7 +238,9 @@ class OvernightEnv(Env):
         return self._deadline is not None and asyncio.get_running_loop().time() >= self._deadline
 
     @web.middleware
-    async def _watch(self, request: web.Request, handler: Any) -> web.StreamResponse:
+    async def _record_unserved_request(
+        self, request: web.Request, handler: Any
+    ) -> web.StreamResponse:
         try:
             response = await handler(request)
         except (Exception, asyncio.CancelledError) as error:
@@ -239,9 +251,9 @@ class OvernightEnv(Env):
             self._proxy_errors.append(f"{response.status} {body}")
         return response
 
-    async def _next(self) -> _Pending | None:
+    async def _next_policy_call(self) -> _Pending | None:
         assert self._worker is not None
-        getter = asyncio.ensure_future(self._bridge.requests.get())
+        getter = asyncio.ensure_future(self._sampling_client.requests.get())
         remaining = None
         if self._deadline is not None:
             remaining = max(0.0, self._deadline - asyncio.get_running_loop().time())
@@ -259,14 +271,14 @@ class OvernightEnv(Env):
             return None
         if getter.done() and not getter.cancelled():
             return self._current
-        self._timed_out = True
+        self._agent_ran_out_of_time = True
         self.close_soon()
         return None
 
     def _final(self) -> tuple[float, dict[str, float]]:
         if self._proxy_errors:
             raise OvernightError(f"the policy proxy failed a harness call: {self._proxy_errors[0]}")
-        if self._timed_out:
+        if self._agent_ran_out_of_time:
             return 0.0, {"overnight/agent_failure": 0.0, "stop/rollout_timeout": 1.0}
         assert self.result is not None
         score, metrics = reward(self.result)
@@ -291,7 +303,7 @@ class OvernightEnv(Env):
         try:
             stdout, stderr = await self._process.communicate(line.encode() + b"\n")
         except BaseException:
-            await asyncio.shield(_stop(self._process))
+            await asyncio.shield(_interrupt_then_kill_group(self._process))
             raise
         lines = stdout.decode().strip().splitlines()
         if self._process.returncode != 0 or not lines:
@@ -311,28 +323,40 @@ class OvernightEnv(Env):
         await asyncio.shield(self._closing)
 
     async def _close(self) -> None:
+        await self._stop_worker_and_so_its_harness()
+        self._cancel_unanswered_calls()
+        if self._runner is not None:
+            await self._runner.cleanup()
+
+    async def _stop_worker_and_so_its_harness(self) -> None:
         if self._process is not None:
-            await _stop(self._process)
+            await _interrupt_then_kill_group(self._process)
         if self._worker is not None and not self._worker.done():
             self._worker.cancel()
         if self._worker is not None:
             with contextlib.suppress(BaseException):
                 await self._worker
-        while not self._bridge.requests.empty():
-            self._bridge.requests.get_nowait().answer.cancel()
+
+    def _cancel_unanswered_calls(self) -> None:
+        while not self._sampling_client.requests.empty():
+            self._sampling_client.requests.get_nowait().answer.cancel()
         if self._current is not None:
             self._current.answer.cancel()
-        if self._runner is not None:
-            await self._runner.cleanup()
 
 
-async def _stop(process: asyncio.subprocess.Process) -> None:
+def _ended_without_policy_call(
+    score: float, metrics: dict[str, float]
+) -> InitialObservationOverflow:
+    return InitialObservationOverflow(score, metrics)
+
+
+async def _interrupt_then_kill_group(process: asyncio.subprocess.Process) -> None:
     if process.returncode is not None:
         return
     with contextlib.suppress(ProcessLookupError):
         process.send_signal(signal.SIGINT)
     try:
-        await asyncio.wait_for(process.wait(), STOP_SECONDS)
+        await asyncio.wait_for(process.wait(), INTERRUPT_GRACE_SECONDS)
     except TimeoutError:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGKILL)
@@ -340,6 +364,9 @@ async def _stop(process: asyncio.subprocess.Process) -> None:
 
 
 class OvernightEnvGroupBuilder(EnvGroupBuilder):
+    """`group_size` episodes of one case. Episodes in flight never share calls. Holds plain
+    values only, so it pickles."""
+
     def __init__(self, config: EpisodeConfig, case: Case, group_size: int) -> None:
         self.config = config
         self.case = case

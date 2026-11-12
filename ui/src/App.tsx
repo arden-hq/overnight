@@ -8,6 +8,7 @@ import { Sidebar } from "./components/Sidebar";
 import { OperationBar } from "./components/OperationBar";
 import { Unavailable } from "./components/Unavailable";
 import { anyDirty } from "./lib/drafts";
+import { writeStorageIfAllowed } from "./lib/tolerant";
 import { Compare } from "./screens/Compare";
 import { Editor } from "./screens/Editor";
 import { Scenarios } from "./screens/Scenarios";
@@ -18,10 +19,7 @@ function useTheme(): [string, () => void] {
   const [theme, setTheme] = useState(initial);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    try {
-      localStorage.setItem("overnight-theme", theme);
-    } catch {
-    }
+    writeStorageIfAllowed("overnight-theme", theme);
   }, [theme]);
   const toggle = () => {
     const next = theme === "dark" ? "light" : "dark";

@@ -41,15 +41,19 @@ class PiOptions(RequestBudget):
         return self
 
 
-def _reasoning(options: PiOptions) -> JsonObject:
-    off = endpoint(options.provider).reasoning_effort
-    if off is None:
-        return {"reasoning": options.reasoning}
+def _reasoning_model_so_pi_sends_effort(effort_with_thinking_off: str) -> JsonObject:
     return {
         "reasoning": True,
-        "thinkingLevelMap": {"off": off},
+        "thinkingLevelMap": {"off": effort_with_thinking_off},
         "compat": {"supportsReasoningEffort": True},
     }
+
+
+def _reasoning(options: PiOptions) -> JsonObject:
+    effort_with_thinking_off = endpoint(options.provider).reasoning_effort
+    if effort_with_thinking_off is None:
+        return {"reasoning": options.reasoning}
+    return _reasoning_model_so_pi_sends_effort(effort_with_thinking_off)
 
 
 async def prepare(context: SessionContext) -> Launch:

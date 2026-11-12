@@ -3,7 +3,7 @@ from typing import Self
 
 from pydantic import Field, JsonValue, model_validator
 
-from overnight.domain.contracts import JsonObject, NonemptyNameSet, Text
+from overnight.domain.contracts import JsonObject, NonemptySortedNames, TrimmedText
 from overnight.domain.models import Actor, Context
 from overnight.domain.vocabulary import NotificationKind
 from overnight.services.common import find_row, next_id, validate_participants
@@ -12,15 +12,15 @@ from overnight.services.state import State, distinct
 
 
 class ChatMessage(State):
-    id: Text
-    sender: Text = Field(alias="from")
-    body: Text
+    id: TrimmedText
+    sender: TrimmedText = Field(alias="from")
+    body: TrimmedText
     date: int
 
 
 class Conversation(State):
-    id: Text
-    participants: NonemptyNameSet
+    id: TrimmedText
+    participants: NonemptySortedNames
     messages: list[ChatMessage] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -43,16 +43,16 @@ class ChatState(State):
 
 
 class ChatRead(Parameters):
-    conversation_id: Text
+    conversation_id: TrimmedText
 
 
 class ChatSend(ChatRead):
-    body: Text
+    body: TrimmedText
 
 
 class ChatStart(Parameters):
-    participants: NonemptyNameSet
-    body: Text
+    participants: NonemptySortedNames
+    body: TrimmedText
 
 
 class Chat(Service[ChatState]):

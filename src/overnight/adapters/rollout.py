@@ -63,7 +63,8 @@ from overnight.execution.usage import ProcessUsage
 from overnight.execution.variations import VariationConfig, resolve_variant
 
 type EpisodeId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$")]
-type Plain = Annotated[str, StringConstraints(pattern=r'^[^"\\\s{}]+$')]
+NEEDS_NO_JSON_ESCAPING = r'[^"\\\s{}]+'
+type NeedsNoJsonEscaping = Annotated[str, StringConstraints(pattern=f"^{NEEDS_NO_JSON_ESCAPING}$")]
 TOKEN = re.compile(r"\{policy\.(base_url|api_key_env|model)\}")
 
 
@@ -71,11 +72,11 @@ class PolicyEndpoint(Contract):
     """The trained model: an OpenAI-compatible endpoint and the model name it serves."""
 
     provider: CompatibleProvider
-    model: Plain
+    model: NeedsNoJsonEscaping
 
     @model_validator(mode="after")
-    def plain_base_url(self) -> Self:
-        if re.fullmatch(r'[^"\\\s{}]+', self.provider.base_url) is None:
+    def base_url_needs_no_json_escaping(self) -> Self:
+        if re.fullmatch(NEEDS_NO_JSON_ESCAPING, self.provider.base_url) is None:
             raise ValueError(
                 "policy base_url may not contain quotes, backslashes, spaces or braces"
             )
@@ -255,7 +256,8 @@ def _operator(request: RolloutRequest, resolved: ResolvedScenario) -> OperatorTr
     return ModelTransport(persona.model, resolved.config.seed)
 
 
-AGENT_CAUSED = frozenset({OperatorBudgetExceeded.__name__})
+def _agent_exhausted_operator_budget(failure: JsonObject) -> bool:
+    return failure.get("type") == OperatorBudgetExceeded.__name__
 
 
 def _failure(verdict: JsonObject) -> RolloutFailure | None:
@@ -263,13 +265,49 @@ def _failure(verdict: JsonObject) -> RolloutFailure | None:
     if not isinstance(failure, dict):
         return None
     kind = FailureKind(str(failure.get("kind")))
-    if failure.get("type") in AGENT_CAUSED:
-        kind = FailureKind.AGENT
     return RolloutFailure(
-        kind=kind,
+        kind=FailureKind.AGENT if _agent_exhausted_operator_budget(failure) else kind,
         type=str(failure.get("type")),
         message=str(failure.get("message")),
     )
+
+
+def _runner_assigned_captures(
+    paths: list[Path], agent_folder: Path
+) -> tuple[list[CaptureFile], list[UnansweredCall]]:
+    captures: list[CaptureFile] = []
+    unanswered: list[UnansweredCall] = []
+    for path in paths:
+        capture = read_capture(path)
+        unanswered.extend(capture.unanswered)
+        if capture.calls:
+            captures.append(
+                CaptureFile(source=path.relative_to(agent_folder).as_posix(), calls=capture.calls)
+            )
+    return captures, unanswered
+
+
+def _unanswered_calls_outrank_an_agent_failure(
+    failure: RolloutFailure | None, unanswered: list[UnansweredCall]
+) -> RolloutFailure | None:
+    if unanswered and (failure is None or failure.kind == FailureKind.AGENT):
+        return _unanswered(unanswered)
+    return failure
+
+
+def _unreadable_capture(error: Exception) -> RolloutFailure:
+    return RolloutFailure(
+        kind=FailureKind.INFRASTRUCTURE,
+        type=type(error).__name__,
+        message=f"unreadable capture file: {error}",
+    )
+
+
+CAPTURE_MISSING = RolloutFailure(
+    kind=FailureKind.INFRASTRUCTURE,
+    type="CaptureMissing",
+    message="the agent made model calls but captured none",
+)
 
 
 def _unanswered(calls: list[UnansweredCall]) -> RolloutFailure:
@@ -299,7 +337,7 @@ WORKER_ENVIRONMENT = frozenset(
         "DOCKER_CONFIG",
     }
 )
-CLEANED = "OVERNIGHT_ROLLOUT_CLEAN_ENV"
+ALREADY_RESTARTED_CLEAN_VARIABLE = "OVERNIGHT_ROLLOUT_CLEAN_ENV"
 
 
 def worker_environment(environ: Mapping[str, str], passed: Iterable[str] = ()) -> dict[str, str]:
@@ -311,9 +349,9 @@ def _clean_environment(passed: Iterable[str]) -> None:
     """Restart this process with `worker_environment` only. Removing variables would not do:
     other processes of the same user, a host agent included, read the environment a process
     started with (`ps eww`), and a restart replaces it."""
-    if os.environ.pop(CLEANED, None) is not None:
+    if os.environ.pop(ALREADY_RESTARTED_CLEAN_VARIABLE, None) is not None:
         return
-    environ = worker_environment(os.environ, passed) | {CLEANED: "1"}
+    environ = worker_environment(os.environ, passed) | {ALREADY_RESTARTED_CLEAN_VARIABLE: "1"}
     os.execve(sys.executable, sys.orig_argv, environ)
 
 
@@ -345,32 +383,14 @@ class RolloutWorker:
                 )
             failure = _failure(result.verdict)
             captures: list[CaptureFile] = []
-            unanswered: list[UnansweredCall] = []
             try:
-                for path in result.capture_paths:
-                    capture = read_capture(path)
-                    unanswered.extend(capture.unanswered)
-                    if capture.calls:
-                        captures.append(
-                            CaptureFile(
-                                source=path.relative_to(agent).as_posix(), calls=capture.calls
-                            )
-                        )
-                if unanswered and (failure is None or failure.kind == FailureKind.AGENT):
-                    failure = _unanswered(unanswered)
+                captures, unanswered = _runner_assigned_captures(result.capture_paths, agent)
+                failure = _unanswered_calls_outrank_an_agent_failure(failure, unanswered)
             except (OSError, ValueError) as error:
-                captures = []
-                failure = RolloutFailure(
-                    kind=FailureKind.INFRASTRUCTURE,
-                    type=type(error).__name__,
-                    message=f"unreadable capture file: {error}",
-                )
-            if request.capture and not captures and result.usage.calls and failure is None:
-                failure = RolloutFailure(
-                    kind=FailureKind.INFRASTRUCTURE,
-                    type="CaptureMissing",
-                    message="the agent made model calls but captured none",
-                )
+                failure = _unreadable_capture(error)
+            made_calls_but_captured_none = not captures and result.usage.calls
+            if request.capture and made_calls_but_captured_none and failure is None:
+                failure = CAPTURE_MISSING
         finally:
             if not self.keep:
                 shutil.rmtree(directory, ignore_errors=True)
@@ -386,6 +406,10 @@ class RolloutWorker:
             usage=result.usage,
             operator_usage=result.operator_usage,
         )
+
+
+def _problems_without_request_values(error: ValidationError) -> list:
+    return error.errors(include_url=False, include_input=False)
 
 
 @click.command()
@@ -413,7 +437,7 @@ def main(root: Path, keep: bool, clean_env: bool, pass_env: tuple[str, ...]) -> 
             try:
                 request = RolloutRequest.model_validate_json(line)
             except ValidationError as error:
-                problems = error.errors(include_url=False, include_input=False)
+                problems = _problems_without_request_values(error)
                 raise ValueError(f"invalid rollout request: {problems}") from None
             identifier = request.id
             answer = worker.rollout(request).model_dump_json()

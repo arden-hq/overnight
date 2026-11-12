@@ -19,7 +19,7 @@ from yarl import URL
 
 # verifiers' own request limit (`MAX_REQUEST_BODY`); aiohttp's default is 1 MiB.
 MAX_REQUEST_BODY = 1024**3
-SKIPPED_HEADERS = frozenset(
+HOP_BY_HOP_HEADERS = frozenset(
     {
         "connection",
         "proxy-connection",
@@ -30,10 +30,11 @@ SKIPPED_HEADERS = frozenset(
         "trailer",
         "transfer-encoding",
         "upgrade",
-        "host",
-        "content-length",
     }
 )
+FRAMING_HEADERS_EACH_SIDE_SETS = frozenset({"host", "content-length"})
+SKIPPED_HEADERS = HOP_BY_HOP_HEADERS | FRAMING_HEADERS_EACH_SIDE_SETS
+UNBOUNDED_HARNESS_CLIENT_TIMES_OUT = aiohttp.ClientTimeout(total=None)
 
 
 class PolicyForwarder:
@@ -59,7 +60,7 @@ class PolicyForwarder:
         port = sock.getsockname()[1]
         try:
             async with aiohttp.ClientSession(
-                auto_decompress=False, timeout=aiohttp.ClientTimeout(total=None)
+                auto_decompress=False, timeout=UNBOUNDED_HARNESS_CLIENT_TIMES_OUT
             ) as client:
                 self._client = client
                 await web.SockSite(runner, sock).start()
@@ -70,9 +71,9 @@ class PolicyForwarder:
 
     async def _forward(self, request: web.Request) -> web.StreamResponse:
         assert self._client is not None
-        call = request.method == "POST"
-        answered = False
-        self.open += call
+        is_policy_call = request.method == "POST"
+        whole_answer_written = False
+        self.open += is_policy_call
         try:
             body = await request.read()
             async with self._client.request(
@@ -90,11 +91,11 @@ class PolicyForwarder:
                 async for chunk in upstream.content.iter_any():
                     await response.write(chunk)
                 await response.write_eof()
-                answered = True
+                whole_answer_written = True
                 return response
         finally:
-            self.open -= call
-            if call and not answered:
+            self.open -= is_policy_call
+            if is_policy_call and not whole_answer_written:
                 self.abandoned += 1
 
 

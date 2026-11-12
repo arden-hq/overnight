@@ -4,7 +4,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import AfterValidator, ConfigDict, Field, JsonValue, model_validator
 
-from overnight.domain.contracts import Contract, JsonObject, Names, NameSet, Text
+from overnight.domain.contracts import Contract, JsonObject, Names, SortedNames, TrimmedText
 from overnight.domain.models import Actor, Context, json_equal
 from overnight.domain.values import instant
 from overnight.domain.vocabulary import NotificationKind
@@ -27,9 +27,9 @@ class Record(State):
     # Pydantic requires a non-optional dict here to validate extra JSON values.
     __pydantic_extra__: dict[str, JsonValue] = Field(init=False)  # ty: ignore[invalid-mutable-override]
 
-    id: Text
-    owner_id: Text
-    visible_to: NameSet = Field(default_factory=list)
+    id: TrimmedText
+    owner_id: TrimmedText
+    visible_to: SortedNames = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -87,7 +87,7 @@ class Collection(State):
     add: AddRule | None = None
     update: bool = False
     delete: bool = False
-    fields: dict[Text, FieldRule] = Field(default_factory=dict)
+    fields: dict[TrimmedText, FieldRule] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_records(self) -> Self:
@@ -107,20 +107,20 @@ class Collection(State):
 
 
 class RecordsState(State):
-    collections: dict[Text, Collection] = Field(default_factory=dict)
+    collections: dict[TrimmedText, Collection] = Field(default_factory=dict)
 
 
 class RecordList(Parameters):
-    collection: Text
+    collection: TrimmedText
 
 
 class RecordGet(RecordList):
-    id: Text
+    id: TrimmedText
 
 
 class RecordAdd(RecordList):
     fields: RecordFields
-    visible_to: NameSet = Field(default_factory=list)
+    visible_to: SortedNames = Field(default_factory=list)
 
 
 class RecordUpdate(RecordGet):

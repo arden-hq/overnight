@@ -15,3 +15,16 @@ export function Hint({ label, keys, children }: { label: string; keys?: string[]
     </Tooltip>
   );
 }
+
+export function HintEvenWhenDisabled({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex" onClick={(e) => e.stopPropagation()}>
+          {children}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}

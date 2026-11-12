@@ -1,4 +1,5 @@
 import type { Json } from "./run";
+import { parseJsonOrUndefined } from "./tolerant";
 
 export function put(target: Json, key: string, value: unknown) {
   if (value === undefined || (typeof value === "number" && Number.isNaN(value))) delete target[key];
@@ -23,11 +24,8 @@ export const pathText = (path: unknown): string =>
 export function parsePath(text: string): (string | number)[] {
   const trimmed = text.trim();
   if (trimmed.startsWith("[")) {
-    try {
-      const parsed: unknown = JSON.parse(trimmed);
-      if (Array.isArray(parsed)) return parsed.map((p) => (typeof p === "number" ? p : String(p)));
-    } catch {
-    }
+    const parsed = parseJsonOrUndefined(trimmed);
+    if (Array.isArray(parsed)) return parsed.map((p) => (typeof p === "number" ? p : String(p)));
   }
   const parts: (string | number)[] = [];
   for (const piece of trimmed.split(".")) {

@@ -37,17 +37,24 @@ def native_skills(runtime: Path, options: PrimeOptions) -> list[Path]:
     return skills
 
 
+def _interpreter_settings_without_machine_path(venv_config: Path) -> str:
+    return "\n".join(
+        sorted(line for line in venv_config.read_text().splitlines() if not line.startswith("home"))
+    )
+
+
+def _installed_file_hash_records(kernel: Path) -> list[Path]:
+    return sorted(kernel.glob("lib/python*/site-packages/*.dist-info/RECORD"))
+
+
 def runtime_identity(runtime: Path, release: str):
     identity = source_identity(runtime / "bin", release)
     kernel = runtime / "kernel"
     digest = hashlib.sha256(identity.sha256.encode())
-    config = kernel / "pyvenv.cfg"
-    if config.is_file():
-        lines = sorted(
-            line for line in config.read_text().splitlines() if not line.startswith("home")
-        )
-        digest.update("\n".join(lines).encode())
-    for record in sorted(kernel.glob("lib/python*/site-packages/*.dist-info/RECORD")):
+    venv_config = kernel / "pyvenv.cfg"
+    if venv_config.is_file():
+        digest.update(_interpreter_settings_without_machine_path(venv_config).encode())
+    for record in _installed_file_hash_records(kernel):
         digest.update(record.relative_to(kernel).as_posix().encode())
         digest.update(record.read_bytes())
     return identity.model_copy(update={"sha256": digest.hexdigest()})

@@ -1,6 +1,6 @@
 import verifiers.v1 as vf
 
-from overnight_verifiers.harness import EPISODE_SESSIONS, OvernightHarness
+from overnight_verifiers.harness import OvernightHarness, own_episode_sessions
 from overnight_verifiers.taskset import has_persona
 
 # Pinned, so `--env.<seat>.harness.*` options validate against Overnight's harness config.
@@ -36,12 +36,14 @@ class OvernightEnv(vf.Env[OvernightEnvConfig]):
         agents.operator.trainable = False
 
     async def run(self, task, agents) -> None:
-        token = EPISODE_SESSIONS.set({})
-        try:
+        with own_episode_sessions():
             if has_persona(task.data.scenario):
-                async with agents.operator.interaction(vf.Task(vf.TaskData())):
+                async with _operator_session_open_for_the_episode(agents.operator):
                     await agents.agent.run(task)
             else:
                 await agents.agent.run(task)
-        finally:
-            EPISODE_SESSIONS.reset(token)
+
+
+def _operator_session_open_for_the_episode(operator):
+    no_task_of_its_own = vf.Task(vf.TaskData())
+    return operator.interaction(no_task_of_its_own)

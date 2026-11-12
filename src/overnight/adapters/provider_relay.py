@@ -42,8 +42,8 @@ from starlette.routing import Route
 
 from overnight.adapters.evidence import UsageMeter
 from overnight.adapters.provider import Provider, endpoint
-from overnight.domain.contracts import Contract, JsonObject
-from overnight.domain.transport import CAPTURE_PATH_VARIABLE
+from overnight.domain.contracts import CompatibleProvider, Contract, JsonObject
+from overnight.domain.transport import TRAINING_CAPTURE_PATH_VARIABLE
 
 type Api = Literal["chat", "responses"]
 
@@ -111,7 +111,7 @@ LOCAL_TOOL_TYPES = frozenset({"function", "custom"})
 MEDIA_TYPES = frozenset({"image_url", "input_image", "input_file", "input_audio", "file"})
 
 
-CAPTURE_RESPONSE_FIELDS = frozenset({"prompt_token_ids", "prompt_logprobs", "kv_transfer_params"})
+UNREQUESTED_ENGINE_FIELDS = frozenset({"prompt_token_ids", "prompt_logprobs", "kv_transfer_params"})
 
 
 type LogprobsOutcome = Literal["returned", "not_returned", "incomplete"]
@@ -176,7 +176,7 @@ def run_capture() -> Path | None:
 
     The first call takes the variable out of the process environment, so a harness or tool
     process the connector starts later does not inherit it; later calls return the same path."""
-    target = os.environ.pop(CAPTURE_PATH_VARIABLE, None)
+    target = os.environ.pop(TRAINING_CAPTURE_PATH_VARIABLE, None)
     return Path(target) if target else None
 
 
@@ -239,7 +239,7 @@ def _captured_call(request: int, completion: JsonObject) -> CapturedCall | None:
 def _harness_completion(completion: JsonObject) -> JsonObject:
     choices = completion.get("choices")
     return {
-        key: value for key, value in completion.items() if key not in CAPTURE_RESPONSE_FIELDS
+        key: value for key, value in completion.items() if key not in UNREQUESTED_ENGINE_FIELDS
     } | {
         "choices": [
             {key: value for key, value in choice.items() if key != "token_ids"} | {"logprobs": None}
@@ -284,6 +284,9 @@ def _replayed_stream(completion: JsonObject, include_usage: bool) -> Iterator[st
     yield "data: [DONE]\n\n"
 
 
+FRAMING_TOKENS_PER_REQUEST = 4096
+
+
 class RequestBudget(Contract):
     """Per-run request limits and the rates that bound their cost."""
 
@@ -302,7 +305,7 @@ class RequestBudget(Contract):
         bound = (
             self.max_requests
             * (
-                (self.max_request_bytes + 4096) * self.input_usd_per_million
+                (self.max_request_bytes + FRAMING_TOKENS_PER_REQUEST) * self.input_usd_per_million
                 + self.max_tokens * self.output_usd_per_million
             )
             / 1_000_000
@@ -312,14 +315,21 @@ class RequestBudget(Contract):
         return self
 
 
-def upstream_payload(provider: Provider, payload: JsonObject, max_tokens: int) -> JsonObject:
+def openrouter_chat_payload(payload: JsonObject, max_tokens: int) -> JsonObject:
     payload = {key: value for key, value in payload.items() if key != "max_completion_tokens"}
-    if provider == "openrouter":
-        return payload | {"max_tokens": max_tokens}
+    return payload | {"max_tokens": max_tokens}
+
+
+OPENROUTER_ONLY_FIELDS = frozenset({"max_tokens", "reasoning", "usage"})
+
+
+def compatible_chat_payload(
+    provider: CompatibleProvider, payload: JsonObject, max_tokens: int
+) -> JsonObject:
     payload = {
         key: value
         for key, value in payload.items()
-        if key not in {"max_tokens", "reasoning", "usage"}
+        if key != "max_completion_tokens" and key not in OPENROUTER_ONLY_FIELDS
     }
     if provider.reasoning_effort is not None:
         payload["reasoning_effort"] = provider.reasoning_effort
@@ -491,7 +501,10 @@ class ProviderRelay:
             return refused
         route = endpoint(self.provider)
         if api == "chat":
-            payload = upstream_payload(self.provider, payload, self.budget.max_tokens)
+            if self.provider == "openrouter":
+                payload = openrouter_chat_payload(payload, self.budget.max_tokens)
+            else:
+                payload = compatible_chat_payload(self.provider, payload, self.budget.max_tokens)
             url = route.chat_completions_url
         else:
             payload = responses_payload(self.provider, payload, self.budget.max_tokens)

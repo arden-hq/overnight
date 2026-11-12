@@ -22,7 +22,7 @@ from overnight.domain.contracts import (
     Scenario,
     ScenarioError,
     ScheduledDecision,
-    Text,
+    TrimmedText,
 )
 from overnight.domain.models import json_equal
 from overnight.domain.values import JsonObject
@@ -147,6 +147,10 @@ def canonical_arguments(config: Scenario, definitions: Mapping[str, ServiceBound
     return canonical
 
 
+class MatchesNothing:
+    pass
+
+
 class ScriptedOperator:
     def __init__(self, steps: Iterable[OperatorStep], canonical: Canonical) -> None:
         indexed = [
@@ -159,15 +163,17 @@ class ScriptedOperator:
             index: self._read(step.match.service_id, step.match.operation, step.match.args)
             for index, step in indexed
         }
-        self.asked: dict[str, JsonObject | None] = {}
+        self.asked: dict[str, JsonObject | MatchesNothing] = {}
 
-    def _read(self, service_id: str, operation: str, args: JsonObject) -> JsonObject | None:
+    def _read(
+        self, service_id: str, operation: str, args: JsonObject
+    ) -> JsonObject | MatchesNothing:
         try:
             return self.canonical(service_id, operation, args)
         except ValueError:
-            return None
+            return MatchesNothing()
 
-    def _requested(self, request: ApprovalRequest) -> JsonObject | None:
+    def _requested(self, request: ApprovalRequest) -> JsonObject | MatchesNothing:
         if request.id not in self.asked:
             self.asked[request.id] = self._read(request.service_id, request.operation, request.args)
         return self.asked[request.id]
@@ -176,7 +182,9 @@ class ScriptedOperator:
         if (request.service_id, request.operation) != (step.match.service_id, step.match.operation):
             return False
         wanted, requested = self.wanted[index], self._requested(request)
-        return wanted is not None and requested is not None and json_equal(requested, wanted)
+        if isinstance(wanted, MatchesNothing) or isinstance(requested, MatchesNothing):
+            return False
+        return json_equal(requested, wanted)
 
     def _open(self) -> list[tuple[int, ScheduledDecision]]:
         return [(index, step) for index, step in self.steps if index not in self.completed]
@@ -270,12 +278,12 @@ PROMPT_VERSION = hashlib.sha256(
 
 
 class ReplyOutput(Contract):
-    message: Text | None
+    message: TrimmedText | None
 
 
 class DecisionOutput(Contract):
     decision: Literal["approve", "deny"]
-    message: Text | None = None
+    message: TrimmedText | None = None
 
 
 def prompt_digest(prompt: Sequence[Message]) -> str:

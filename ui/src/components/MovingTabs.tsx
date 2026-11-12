@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { onNextTaskEvenInHiddenTab } from "@/lib/tolerant";
 import { TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export function MovingTabs({ value, items, variant, className, triggerClassName }: { value: string; items: { value: string; label: ReactNode }[]; variant: "line" | "pill"; className?: string; triggerClassName?: string }) {
@@ -22,9 +23,7 @@ export function MovingTabs({ value, items, variant, className, triggerClassName 
 
   useLayoutEffect(() => {
     if (!box || ready) return;
-    // A timer, not requestAnimationFrame: a hidden tab runs no frames.
-    const h = setTimeout(() => setReady(true), 0);
-    return () => clearTimeout(h);
+    return onNextTaskEvenInHiddenTab(() => setReady(true));
   }, [box, ready]);
 
   return (

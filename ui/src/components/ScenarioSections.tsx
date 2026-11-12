@@ -537,24 +537,24 @@ function checkTarget(check: Json): string {
 const copy = (value: unknown): unknown => JSON.parse(JSON.stringify(value));
 const isPattern = (value: unknown) => typeof value === "object" && value !== null && !Array.isArray(value) && Object.keys(value).length > 0;
 
-function setCheckOp(check: Json, op: string | undefined, stash: Json) {
+function setCheckOp(check: Json, op: string | undefined, fieldsOfOtherTests: Json) {
   const from = check.op;
   if (from === "before") {
-    for (const key of ["first", "then"]) if (check[key] !== undefined) stash[key] = copy(check[key]);
+    for (const key of ["first", "then"]) if (check[key] !== undefined) fieldsOfOtherTests[key] = copy(check[key]);
   } else {
-    stash.source = check.source ?? "state";
-    for (const key of ["path", "value"]) if (check[key] !== undefined) stash[key] = copy(check[key]);
+    fieldsOfOtherTests.source = check.source ?? "state";
+    for (const key of ["path", "value"]) if (check[key] !== undefined) fieldsOfOtherTests[key] = copy(check[key]);
   }
-  const take = (key: string) => {
-    if (check[key] === undefined && stash[key] !== undefined) check[key] = copy(stash[key]);
+  const restore = (key: string) => {
+    if (check[key] === undefined && fieldsOfOtherTests[key] !== undefined) check[key] = copy(fieldsOfOtherTests[key]);
   };
   check.op = op;
   if (op === "before") {
     check.source = "trace";
     delete check.path;
     delete check.value;
-    take("first");
-    take("then");
+    restore("first");
+    restore("then");
     check.first ??= { kind: "invocation" };
     check.then ??= { kind: "invocation" };
     return;
@@ -562,13 +562,13 @@ function setCheckOp(check: Json, op: string | undefined, stash: Json) {
   if (from === "before") {
     delete check.first;
     delete check.then;
-    if (stash.source !== undefined) put(check, "source", stash.source === "state" ? undefined : stash.source);
+    if (fieldsOfOtherTests.source !== undefined) put(check, "source", fieldsOfOtherTests.source === "state" ? undefined : fieldsOfOtherTests.source);
   }
   if (op === "unchanged") delete check.source;
-  take("path");
+  restore("path");
   check.path ??= check.source === undefined || check.source === "state" ? ["services"] : [];
   if (VALUE_OPS.includes(op ?? "")) {
-    take("value");
+    restore("value");
     check.value ??= null;
   } else delete check.value;
 }
@@ -576,11 +576,11 @@ function setCheckOp(check: Json, op: string | undefined, stash: Json) {
 export function ChecksSection({ doc, edit }: Props) {
   const tasks = arr(doc.tasks).map(obj);
   const [scope, setScope] = useState<string>("scenario");
-  const stashes = useRef(new Map<string, Json>());
-  const stash = (key: string, i: number) => {
+  const fieldsOfOtherTestsByCheck = useRef(new Map<string, Json>());
+  const fieldsOfOtherTests = (key: string, i: number) => {
     const id = `${scope}/${key}/${i}`;
-    if (!stashes.current.has(id)) stashes.current.set(id, {});
-    return stashes.current.get(id) as Json;
+    if (!fieldsOfOtherTestsByCheck.current.has(id)) fieldsOfOtherTestsByCheck.current.set(id, {});
+    return fieldsOfOtherTestsByCheck.current.get(id) as Json;
   };
   const taskIndex = tasks.findIndex((t) => str(t.id) === scope);
   const checks = obj(taskIndex >= 0 ? tasks[taskIndex].checks : doc.checks);
@@ -607,7 +607,7 @@ export function ChecksSection({ doc, edit }: Props) {
             itemName={(c, i) => str(c.label) ?? `${name.toLowerCase()} check ${i + 1}`}
             onAdd={() => edit((d) => void list(target(d), key).push(forbidden ? { match: { kind: "invocation" } } : { op: "exists", path: ["services"] }))}
             onRemove={(i) => {
-              stashes.current.clear();
+              fieldsOfOtherTestsByCheck.current.clear();
               edit((d) => void list(target(d), key).splice(i, 1));
             }}
             columns={
@@ -644,7 +644,7 @@ export function ChecksSection({ doc, edit }: Props) {
                         value={c.op}
                         options={CHECK_OPS}
                         onChange={(v) => {
-                          const kept = stash(key, i);
+                          const kept = fieldsOfOtherTests(key, i);
                           editCheck(i, (x) => setCheckOp(x, v, kept));
                         }}
                       />

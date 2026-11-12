@@ -8,14 +8,14 @@ from pydantic import Field
 
 from overnight.adapters.acp_session import NativeClient
 from overnight.adapters.protocol import Steer
-from overnight.domain.contracts import Contract, JsonObject, Text
+from overnight.domain.contracts import Contract, JsonObject, TrimmedText
 from overnight.execution.harness import Capabilities, HarnessStatus
 from overnight.execution.provenance import CodeIdentity, ModelConfiguration
 from overnight.execution.tool_server import ToolCatalog
 
 
 class AdapterConfig(Contract):
-    factory: Text
+    factory: TrimmedText
     evidence: Path
     options: JsonObject = Field(default_factory=dict)
     timeout_seconds: float = Field(default=120, gt=0, le=600)
@@ -28,7 +28,7 @@ class NativeTurn(Contract):
 
 
 class NativeRequest(Contract):
-    method: Text
+    method: TrimmedText
     params: JsonObject
 
 
@@ -64,7 +64,7 @@ class Launch(Contract):
     steer: Callable[[Steer], Awaitable[None]] | None = Field(default=None, exclude=True, repr=False)
     cancel: Callable[[], Awaitable[None]] | None = Field(default=None, exclude=True, repr=False)
     reset: Callable[[], Awaitable[None]] | None = Field(default=None, exclude=True, repr=False)
-    command: list[Text] = Field(min_length=1)
+    command: list[TrimmedText] = Field(min_length=1)
     cwd: Path
     env: dict[str, str] = Field(default_factory=dict, repr=False)
     adapter_code: CodeIdentity

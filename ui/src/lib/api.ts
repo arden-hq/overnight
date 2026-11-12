@@ -1,5 +1,6 @@
 import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { ApiError, RunList, RunSummary, ScenarioList, ScenarioSummary, StatusResponse, TraceLine, TraceQueryResult } from "../api/types";
+import { parseJsonOrUndefined } from "./tolerant";
 
 export class ApiFailure extends Error {
   readonly status: number;
@@ -231,12 +232,9 @@ export function useSnapshots(runId: string): { snapshots?: Snapshot[]; error?: s
       const out: Snapshot[] = [];
       (await response.text()).split("\n").forEach((text, index) => {
         if (!text.includes('"state_change"')) return;
-        try {
-          const row: unknown = JSON.parse(text);
-          const snapshot = isRecord(row) ? fromRow(index + 1, row) : undefined;
-          if (snapshot) out.push(snapshot);
-        } catch {
-        }
+        const row = parseJsonOrUndefined(text);
+        const snapshot = isRecord(row) ? fromRow(index + 1, row) : undefined;
+        if (snapshot) out.push(snapshot);
       });
       return out;
     };

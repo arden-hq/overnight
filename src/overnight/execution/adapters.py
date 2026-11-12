@@ -34,11 +34,11 @@ from overnight.domain.contracts import (
 )
 from overnight.domain.transport import (
     AGENT_DIRECTORY_VARIABLE,
-    CAPTURE_PATH_VARIABLE,
     COMMAND_TIMEOUT_SECONDS,
     GRACEFUL_EXIT_SECONDS,
     PERSISTENT_TIMEOUT_SECONDS,
     TERMINATE_WAIT_SECONDS,
+    TRAINING_CAPTURE_PATH_VARIABLE,
     UNRUNNABLE_EXIT_CODES,
     USAGE_PATH_VARIABLE,
 )
@@ -217,6 +217,19 @@ class CommandAdapter(ManagedAdapter):
     def reset(self) -> None: ...
 
 
+@dataclass(frozen=True)
+class Training:
+    capture: bool = False
+    policy_port: int | None = None
+
+    @property
+    def requested(self) -> bool:
+        return self.capture or self.policy_port is not None
+
+
+NO_TRAINING = Training()
+
+
 class PersistentCommandAdapter(ManagedAdapter):
     def __init__(
         self,
@@ -224,20 +237,18 @@ class PersistentCommandAdapter(ManagedAdapter):
         timeout_seconds: float = PERSISTENT_TIMEOUT_SECONDS,
         provenance_path: Path | None = None,
         container: AgentContainer | None = None,
-        capture: bool = False,
-        policy_port: int | None = None,
+        training: Training = NO_TRAINING,
     ) -> None:
-        if capture and provenance_path is None:
+        if training.capture and provenance_path is None:
             raise ValueError("capture needs a provenance path")
-        if policy_port is not None and container is None:
+        if training.policy_port is not None and container is None:
             raise ValueError("a policy port is for a contained agent")
         self.command = command
         self.timeout_seconds = timeout_seconds
         self.provenance_path = provenance_path
         self.provenance_paths: list[Path] = []
         self.container = container
-        self.capture = capture
-        self.policy_port = policy_port
+        self.training = training
         self.capture_paths: list[Path] = []
         self._capture_folder: Path | None = None
         self.container_name: str | None = None
@@ -278,7 +289,7 @@ class PersistentCommandAdapter(ManagedAdapter):
             variables["OVERNIGHT_PROVENANCE_PATH"] = str(provenance)
             variables[USAGE_PATH_VARIABLE] = str(usage_path(provenance))
         if capture is not None:
-            variables[CAPTURE_PATH_VARIABLE] = capture
+            variables[TRAINING_CAPTURE_PATH_VARIABLE] = capture
         if directory is not None:
             variables[AGENT_DIRECTORY_VARIABLE] = directory
         return variables
@@ -305,7 +316,7 @@ class PersistentCommandAdapter(ManagedAdapter):
         self.container_name = new_name()
         self._egress_log = None
         capture = None
-        if self.capture and self._kept is not None:
+        if self.training.capture and self._kept is not None:
             self._capture_folder = Path(mkdtemp(prefix="overnight-capture-"))
             own_folder(self._capture_folder)
             self.capture_paths.append(capture_path(self._kept.with_suffix(".json")))
@@ -314,13 +325,14 @@ class PersistentCommandAdapter(ManagedAdapter):
             Path(PurePosixPath(AGENT_DIRECTORY, "provenance.json")), capture, AGENT_DIRECTORY
         )
         network = "none"
-        if self.container.allow_hosts or self.policy_port is not None:
+        policy_port = self.training.policy_port
+        if self.container.allow_hosts or policy_port is not None:
             self._egress_log = folder / "egress.log"
             try:
-                network = await start_egress(self.container_name, self.container, self.policy_port)
+                network = await start_egress(self.container_name, self.container, policy_port)
             except ContainerUnavailable as error:
                 raise AdapterError(str(error)) from error
-            variables |= egress_variables(self.policy_port is not None)
+            variables |= egress_variables(policy_port is not None)
         return container_command(
             self.container,
             self.command,
@@ -336,7 +348,7 @@ class PersistentCommandAdapter(ManagedAdapter):
         for key in (
             "OVERNIGHT_CHAT_ID",
             "OVERNIGHT_CHAT_NAMESPACE",
-            CAPTURE_PATH_VARIABLE,
+            TRAINING_CAPTURE_PATH_VARIABLE,
             AGENT_DIRECTORY_VARIABLE,
         ):
             environment.pop(key, None)
@@ -365,7 +377,7 @@ class PersistentCommandAdapter(ManagedAdapter):
                 except OSError as error:
                     raise AdapterError(f"agent process folder is unavailable: {error}") from error
                 directory = str(folder)
-                if self.capture:
+                if self.training.capture:
                     self.capture_paths.append(capture_path(path))
                     capture = str(capture_path(path))
             environment.update(self._variables(path, capture, directory))
@@ -697,8 +709,7 @@ def _keep_capture(source: Path, target: Path) -> None:
 def make_adapter(
     config: Agent,
     provenance_path: Path | None = None,
-    capture: bool = False,
-    policy_port: int | None = None,
+    training: Training = NO_TRAINING,
 ) -> ManagedAdapter:
     match config:
         case HarnessAgent():
@@ -710,8 +721,7 @@ def make_adapter(
                 provenance_path,
                 config.required,
                 config.container,
-                capture,
-                policy_port,
+                training,
             )
         case ScriptedAgent():
             return ScriptedAdapter(
@@ -725,11 +735,10 @@ def make_adapter(
                 else config.timeout_seconds,
                 provenance_path,
                 config.container,
-                capture,
-                policy_port,
+                training,
             )
         case CommandAgent():
-            if capture or policy_port is not None:
+            if training.requested:
                 raise ValueError("training needs a harness or persistent command agent")
             return CommandAdapter(
                 config.command,

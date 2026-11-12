@@ -46,7 +46,9 @@ export class NativeEvidence {
   }
 }
 
-const killGroup = (pid, signal) => {
+const OWN_PROCESS_GROUP = { detached: true }
+
+const signalProcessGroup = (pid, signal) => {
   if (!pid) return
   try {
     process.kill(-pid, signal)
@@ -61,7 +63,11 @@ export class ArdenProcess {
     this.evidence = evidence
     this.commandNumber = 0
     this.pending = new Map()
-    this.onParentExit = () => killGroup(this.child?.pid, "SIGKILL")
+    this.onParentExit = () => this.killHostAndItsDescendants()
+  }
+
+  killHostAndItsDescendants() {
+    signalProcessGroup(this.child?.pid, "SIGKILL")
   }
 
   async start(time) {
@@ -79,7 +85,7 @@ export class ArdenProcess {
         OVERNIGHT_NATIVE_TIME_MS: String(epochMs + time * 1000)
       },
       stdio: ["ignore", serverLog, serverLog, "ipc"],
-      detached: true
+      ...OWN_PROCESS_GROUP
       })
     } finally {
       closeSync(serverLog)
@@ -184,9 +190,9 @@ export class ArdenProcess {
   async close() {
     process.off("exit", this.onParentExit)
     if (!this.child) return
-    killGroup(this.child.pid, "SIGTERM")
+    signalProcessGroup(this.child.pid, "SIGTERM")
     await Promise.race([this.exited, sleep(5_000, undefined, { ref: false })])
-    killGroup(this.child.pid, "SIGKILL")
+    this.killHostAndItsDescendants()
     if (!this.closed) {
       await Promise.race([this.exited, sleep(1_000, undefined, { ref: false })])
       if (!this.closed) throw new Error("Arden host did not close after SIGKILL")

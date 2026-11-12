@@ -17,34 +17,36 @@ class OvernightError(Exception):
     rollout errors and a trainer drops it."""
 
 
-ENGINE_STATUSES = frozenset({408, 429})
+ENGINE_SIDE_4XX = frozenset({408, 429})
+
+
+def failed_on_engine_side(status: int | None) -> bool:
+    transport_fault = status is None
+    return transport_fault or status >= 500 or status in ENGINE_SIDE_4XX
 
 
 def engine_fault(trace: vf.Trace) -> str | None:
     for call in trace.calls:
         error = call.error
-        if error is None:
-            continue
-        status = error.status_code
-        if status is None or status >= 500 or status in ENGINE_STATUSES:
-            return f"{error.type} (status {status}): {error.message}"
+        if error is not None and failed_on_engine_side(error.status_code):
+            return f"{error.type} (status {error.status_code}): {error.message}"
     return None
 
 
-UNANSWERED = "overnight_unanswered_calls"
+UNANSWERED_WHEN_CANCELLED = "overnight_unanswered_calls"
 
 
-def overnight_result(trace: vf.Trace) -> dict[str, Any] | None:
+def result_unless_agent_ran_out_of_time(trace: vf.Trace) -> dict[str, Any] | None:
     result = trace.info.get("overnight")
     if result is not None:
         return result
     fault = engine_fault(trace)
     if fault is not None:
         raise OvernightError(f"the model engine failed under the policy: {fault}")
-    if trace.info.get(UNANSWERED):
+    if trace.info.get(UNANSWERED_WHEN_CANCELLED):
         raise OvernightError(
             f"the rollout stopped (stop {trace.stop_condition}) with "
-            f"{trace.info[UNANSWERED]} policy call(s) the harness got no answer to"
+            f"{trace.info[UNANSWERED_WHEN_CANCELLED]} policy call(s) the harness got no answer to"
         )
     if trace.stop_condition == "agent_timeout":
         return None
@@ -115,7 +117,7 @@ class OvernightTask(vf.Task[OvernightData]):
 
     @vf.reward
     async def overnight_score(self, trace: vf.Trace) -> float:
-        result = overnight_result(trace)
+        result = result_unless_agent_ran_out_of_time(trace)
         if result is None:
             return 0.0
         failure = result["failure"]
@@ -127,7 +129,7 @@ class OvernightTask(vf.Task[OvernightData]):
 
     @vf.metric
     async def overnight_passed(self, trace: vf.Trace) -> float:
-        result = overnight_result(trace)
+        result = result_unless_agent_ran_out_of_time(trace)
         return float(result is not None and result["verdict"] == "passed")
 
 

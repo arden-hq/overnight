@@ -54,10 +54,10 @@ const hashFiles = (root, paths) => {
   return hash.digest("hex")
 }
 
-const connectorFiles = () =>
+const hashedConnectorFiles = () =>
   filesUnder(connectorDir, (name) => name.endsWith(".mjs") && !name.endsWith(".test.mjs"))
 
-const runtimeFiles = (repo) => {
+const hashedRuntimeFiles = (repo) => {
   const server = join(repo, "apps/server-ts")
   const libs = join(repo, "libs")
   const sdk = mcpSdkRoot(repo)
@@ -87,12 +87,12 @@ export const ardenProvenance = (config) => ({
   implementation: "arden",
   code: {
     git_commit: gitCommit(overnightRepo),
-    sha256: hashFiles(overnightRepo, connectorFiles()),
+    sha256: hashFiles(overnightRepo, hashedConnectorFiles()),
     version: overnightVersion()
   },
   runtime: {
     git_commit: gitCommit(config.repo),
-    sha256: hashFiles(config.repo, runtimeFiles(config.repo)),
+    sha256: hashFiles(config.repo, hashedRuntimeFiles(config.repo)),
     version: JSON.parse(readFileSync(join(config.repo, "apps/server-ts/package.json"), "utf8"))
       .version ?? null
   },

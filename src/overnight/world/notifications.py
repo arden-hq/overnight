@@ -57,26 +57,19 @@ class NotificationLog:
         chats: Mapping[str, str] | None = None,
         invoker_chat: str | None = None,
     ) -> list[Posted]:
+        thread_chats = chats or {}
         posted: list[Posted] = []
         for recipient in dict.fromkeys(recipients):
-            actor = self._actors.get(recipient)
-            if actor is None or actor.role != ActorRole.AGENT:
-                continue
-            if service_id is not None and not self._can_see(actor, service_id):
+            if not self._is_agent_who_sees(recipient, service_id):
                 continue
             if recipient != invoker:
                 targets = [
-                    (notification_id(cause, recipient), (chats or {}).get(recipient, chat_id))
+                    (notification_id(cause, recipient), thread_chats.get(recipient, chat_id))
                 ]
-            elif invoker_chat is None:
-                continue
             else:
-                targets = [
-                    (notification_id(cause, recipient, chat), chat)
-                    for chat in self._other_chats(
-                        recipient, invoker_chat, (chats or {}).get(recipient)
-                    )
-                ]
+                targets = self._invoker_targets_outside_the_calling_chat(
+                    cause, recipient, invoker_chat, thread_chats.get(recipient)
+                )
             for id_, target in targets:
                 notification = Notification(
                     id=id_,
@@ -87,20 +80,39 @@ class NotificationLog:
                     summary=summary,
                     chat_id=target,
                 )
-                prior = self._ids.get(notification.id)
-                if prior is not None:
-                    if prior.notification.model_dump(exclude={"time"}) != notification.model_dump(
-                        exclude={"time"}
-                    ):
-                        raise ValueError(
-                            f"notification {notification.id} was posted with other content"
-                        )
+                if self._already_posted(notification):
                     continue
                 entry = Posted(recipient, cause, notification)
                 self._log.append(entry)
                 self._ids[notification.id] = entry
                 posted.append(entry)
         return posted
+
+    def _is_agent_who_sees(self, actor_id: str, service_id: str | None) -> bool:
+        actor = self._actors.get(actor_id)
+        if actor is None or actor.role != ActorRole.AGENT:
+            return False
+        return service_id is None or self._can_see(actor, service_id)
+
+    def _invoker_targets_outside_the_calling_chat(
+        self, cause: str, invoker: str, invoker_chat: str | None, thread_chat: str | None
+    ) -> list[tuple[str, str]]:
+        if invoker_chat is None:
+            return []
+        return [
+            (notification_id(cause, invoker, chat), chat)
+            for chat in self._other_chats(invoker, invoker_chat, thread_chat)
+        ]
+
+    def _already_posted(self, notification: Notification) -> bool:
+        prior = self._ids.get(notification.id)
+        if prior is None:
+            return False
+        if prior.notification.model_dump(exclude={"time"}) != notification.model_dump(
+            exclude={"time"}
+        ):
+            raise ValueError(f"notification {notification.id} was posted with other content")
+        return True
 
     def _other_chats(self, actor_id: str, invoker_chat: str, thread_chat: str | None) -> list[str]:
         if thread_chat is not None:

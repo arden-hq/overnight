@@ -60,7 +60,7 @@ PATCHED_FILES = [
 
 
 OPENROUTER_PACKAGE = "@opencode/ai/providers/openrouter"
-COMPATIBLE_PACKAGE = "@opencode/ai/providers/openai-compatible-responses"
+NON_STRICT_TOOLS_RESPONSES_PACKAGE = "@opencode/ai/providers/openai-compatible-responses"
 RELAY_KEY_ENV = "OVERNIGHT_OPENCODE_PROXY_KEY"
 
 
@@ -321,7 +321,11 @@ def _settings(context: SessionContext, options: OpenCodeOptions, base_url: str) 
         ),
     ]
     provider, model = options.model.split("/", 1)
-    package = OPENROUTER_PACKAGE if options.provider == "openrouter" else COMPATIBLE_PACKAGE
+    package = (
+        OPENROUTER_PACKAGE
+        if options.provider == "openrouter"
+        else NON_STRICT_TOOLS_RESPONSES_PACKAGE
+    )
     return {
         "model": options.model,
         "providers": {

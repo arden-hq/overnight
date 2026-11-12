@@ -7,6 +7,8 @@ from typing import Any
 
 @dataclass(frozen=True)
 class Case:
+    """One generated case. The scenario holds its checks; it never reaches the agent from here."""
+
     id: str
     family: str
     seed: int

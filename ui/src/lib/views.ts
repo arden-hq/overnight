@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import type { ScenarioSummary } from "../api/types";
 import { runStatus } from "./run";
+import { parseJsonOrUndefined, readStorageIfAllowed, writeStorageIfAllowed } from "./tolerant";
 
 export interface ScenarioView {
   kind: "view" | "agent" | "shape";
@@ -43,18 +44,13 @@ export function viewHref(v: ScenarioView): string {
 
 let recent: string[] = [];
 const listeners = new Set<() => void>();
-try {
-  recent = JSON.parse(localStorage.getItem("overnight-recent-scenarios") ?? "[]");
-} catch {
-}
+const storedRecent = parseJsonOrUndefined(readStorageIfAllowed("overnight-recent-scenarios") ?? "[]");
+if (storedRecent !== undefined) recent = storedRecent as string[];
 
 export function visit(id: string) {
   if (recent[0] === id) return;
   recent = [id, ...recent.filter((x) => x !== id)].slice(0, 5);
-  try {
-    localStorage.setItem("overnight-recent-scenarios", JSON.stringify(recent));
-  } catch {
-  }
+  writeStorageIfAllowed("overnight-recent-scenarios", JSON.stringify(recent));
   listeners.forEach((l) => l());
 }
 

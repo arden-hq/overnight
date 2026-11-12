@@ -4,7 +4,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
 
-from overnight.domain.contracts import JsonObject, Nonnegative, Text
+from overnight.domain.contracts import JsonObject, Nonnegative, TrimmedText
 from overnight.domain.models import Actor, Context
 from overnight.domain.vocabulary import NotificationKind
 from overnight.services.common import find_row, next_id
@@ -13,8 +13,8 @@ from overnight.services.state import State, distinct
 
 
 class ShopItem(State):
-    id: Text
-    title: Text
+    id: TrimmedText
+    title: TrimmedText
     price_cents: Nonnegative
     available: Nonnegative | None = None
 
@@ -25,9 +25,9 @@ class OrderStatus(StrEnum):
 
 
 class ShopOrder(State):
-    id: Text
-    item_id: Text
-    buyer_id: Text
+    id: TrimmedText
+    item_id: TrimmedText
+    buyer_id: TrimmedText
     quantity: Annotated[int, Field(ge=1)]
     total_cents: Nonnegative
     status: Literal[OrderStatus.CONFIRMED, OrderStatus.CANCELLED]
@@ -50,12 +50,12 @@ class ShopState(State):
 
 
 class ShopBuy(Parameters):
-    item_id: Text
+    item_id: TrimmedText
     quantity: Annotated[int, Field(ge=1)] = 1
 
 
 class ShopCancel(Parameters):
-    order_id: Text
+    order_id: TrimmedText
 
 
 class Shop(Service[ShopState]):

@@ -4,13 +4,15 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import chz
-from tinker_cookbook.rl.types import EnvGroupBuilder, RLDataset, RLDatasetBuilder
+from tinker_cookbook.rl.types import RLDataset, RLDatasetBuilder
 
 from overnight_tinker.cases import Case, family_cases
-from overnight_tinker.env import EpisodeConfig, OvernightEnvGroupBuilder, operator_key
+from overnight_tinker.env import EpisodeConfig, OvernightEnvGroupBuilder, require_operator_key
 
 
 class OvernightDataset(RLDataset):
+    """Batches of `groups_per_batch` cases, one group of `group_size` episodes per case."""
+
     def __init__(
         self, config: EpisodeConfig, cases: list[Case], group_size: int, groups_per_batch: int
     ) -> None:
@@ -20,7 +22,7 @@ class OvernightDataset(RLDataset):
     def __len__(self) -> int:
         return -(-len(self.builders) // self.groups_per_batch)
 
-    def get_batch(self, index: int) -> Sequence[EnvGroupBuilder]:
+    def get_batch(self, index: int) -> Sequence[OvernightEnvGroupBuilder]:
         start = index * self.groups_per_batch
         return self.builders[start : start + self.groups_per_batch]
 
@@ -70,10 +72,10 @@ class OvernightDatasetBuilder(RLDatasetBuilder):
             rollout_timeout_seconds=self.rollout_timeout_seconds,
             sampling_turn_timeout_seconds=self.sampling_turn_timeout_seconds,
         )
-        operator_key(config)
+        require_operator_key(config)
         return config
 
-    async def __call__(self) -> tuple[RLDataset, RLDataset | None]:
+    async def __call__(self) -> tuple[OvernightDataset, None]:
         config = self.episode_config()
         held_out = [Path(folder) for folder in self.held_out]
         cases = family_cases(self.python, Path(self.family), held_out)

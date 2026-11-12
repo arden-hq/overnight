@@ -213,7 +213,7 @@ def rollout(
 
 def groups(dataset: OvernightDatasetBuilder) -> list[OvernightEnvGroupBuilder]:
     loaded, _ = asyncio.run(dataset())
-    return list(loaded.get_batch(0))  # type: ignore[arg-type]
+    return list(loaded.get_batch(0))
 
 
 def test_cases_load_only_apart_from_the_held_out_cases_and_with_a_named_operator(
@@ -232,7 +232,7 @@ def test_cases_load_only_apart_from_the_held_out_cases_and_with_a_named_operator
 
 
 def test_policy_calls_become_the_trajectory_and_the_score_its_reward(
-    family, tmp_path, operator_url
+    family, tmp_path, operator_url, monkeypatch
 ):
     url, operator_calls = operator_url
     before = len(operator_calls)
@@ -245,7 +245,7 @@ def test_policy_calls_become_the_trajectory_and_the_score_its_reward(
         made.extend(envs)
         return envs
 
-    group.make_envs = recorded
+    monkeypatch.setattr(group, "make_envs", recorded)
     client = FakeSamplingClient()
     result = rollout(group, client, FailFast())
 

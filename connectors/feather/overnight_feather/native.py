@@ -25,24 +25,29 @@ from overnight_feather.options import NativeOptions
 SECRET_ENVIRONMENT = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTH)|^OVERNIGHT_", re.I)
 
 
-def _scrub_environment(environment: dict[str, str]) -> dict[str, str]:
+def _without_secrets(environment: dict[str, str]) -> dict[str, str]:
     return {
         name: value for name, value in environment.items() if not SECRET_ENVIRONMENT.search(name)
     }
 
 
+def _keep_host_secrets_out_of_feather_shell_workers() -> None:
+    inherited_from_host = feather_process._task_environment
+    if getattr(inherited_from_host, "overnight_scrubbed", False):
+        return
+
+    @contextmanager
+    def scrubbed(task_python):
+        with inherited_from_host(task_python) as environment:
+            yield _without_secrets(environment)
+
+    scrubbed.overnight_scrubbed = True
+    feather_process._task_environment = scrubbed
+
+
 class ScrubbedShellRuntime(LocalShellRuntime):
     async def __aenter__(self):
-        original = feather_process._task_environment
-        if not getattr(original, "overnight_scrubbed", False):
-
-            @contextmanager
-            def scrubbed(task_python):
-                with original(task_python) as environment:
-                    yield _scrub_environment(environment)
-
-            scrubbed.overnight_scrubbed = True
-            feather_process._task_environment = scrubbed
+        _keep_host_secrets_out_of_feather_shell_workers()
         return await super().__aenter__()
 
 

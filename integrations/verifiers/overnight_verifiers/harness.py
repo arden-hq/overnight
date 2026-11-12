@@ -4,6 +4,7 @@ import json
 import os
 import signal
 import tempfile
+from collections.abc import Generator
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,7 +15,7 @@ from pydantic import Field
 
 from overnight_verifiers.forwarder import PolicyForwarder
 from overnight_verifiers.taskset import (
-    UNANSWERED,
+    UNANSWERED_WHEN_CANCELLED,
     OvernightError,
     engine_fault,
     has_persona,
@@ -23,7 +24,7 @@ from overnight_verifiers.taskset import (
 
 POLICY_KEY = "OVERNIGHT_POLICY_KEY"
 OPERATOR_KEY = "OVERNIGHT_OPERATOR_KEY"
-STOP_SECONDS = 20.0
+INTERRUPT_GRACE_SECONDS = 20.0
 
 
 @dataclass(frozen=True)
@@ -33,7 +34,16 @@ class Connection:
     model: str
 
 
-EPISODE_SESSIONS: ContextVar[dict[str, Connection]] = ContextVar("overnight_episode_sessions")
+_SESSIONS_BY_ROLE: ContextVar[dict[str, Connection]] = ContextVar("overnight_episode_sessions")
+
+
+@contextlib.contextmanager
+def own_episode_sessions() -> Generator[None, None, None]:
+    token = _SESSIONS_BY_ROLE.set({})
+    try:
+        yield
+    finally:
+        _SESSIONS_BY_ROLE.reset(token)
 
 
 class OvernightHarnessConfig(vf.HarnessConfig):
@@ -53,6 +63,9 @@ class OvernightHarnessConfig(vf.HarnessConfig):
 
 
 class OvernightHarness(vf.Harness[OvernightHarnessConfig]):
+    """Runs one Overnight episode per rollout through `overnight.adapters.rollout`. The worker
+    is a host process: Overnight decides whether the agent runs in a container."""
+
     NEEDS_CONTAINER = False
 
     def __init__(self, config: OvernightHarnessConfig) -> None:
@@ -65,7 +78,7 @@ class OvernightHarness(vf.Harness[OvernightHarnessConfig]):
         self._root = config.root or Path(tempfile.mkdtemp(prefix="overnight-verifiers-"))
 
     async def session(self, ctx, trace, runtime, endpoint, secret, mcp_urls, data, **kwargs):
-        sessions = EPISODE_SESSIONS.get(None)
+        sessions = _SESSIONS_BY_ROLE.get(None)
         if sessions is not None and trace.agent is not None and trace.agent.name:
             sessions[trace.agent.name] = Connection(endpoint, secret, ctx.model)
         return await super().session(
@@ -106,14 +119,16 @@ class OvernightHarness(vf.Harness[OvernightHarnessConfig]):
             raise OvernightError(
                 "set OVERNIGHT_PYTHON or harness.python to Overnight's interpreter"
             )
-        operator = EPISODE_SESSIONS.get({}).get("operator")
+        operator = _SESSIONS_BY_ROLE.get({}).get("operator")
         forwarder = PolicyForwarder(endpoint)
         async with forwarder.serving() as forwarded:
             policy = Connection(forwarded, secret, ctx.model)
             request = self._request(trace.id, data.scenario, policy, operator)
             environ = os.environ | self.config.resolved_env | {POLICY_KEY: secret}
-            passed = [POLICY_KEY, *self.config.resolved_env]
-            result = await self._run_worker(json.dumps(request), environ, passed, trace, forwarder)
+            kept_in_clean_env = [POLICY_KEY, *self.config.resolved_env]
+            result = await self._run_worker(
+                json.dumps(request), environ, kept_in_clean_env, trace, forwarder
+            )
             unanswered = forwarder.unanswered
         if unanswered:
             raise OvernightError(
@@ -143,7 +158,7 @@ class OvernightHarness(vf.Harness[OvernightHarnessConfig]):
         self,
         line: str,
         environ: dict[str, str],
-        passed: list[str],
+        kept_in_clean_env: list[str],
         trace: vf.Trace,
         forwarder: PolicyForwarder,
     ) -> dict[str, Any]:
@@ -155,7 +170,7 @@ class OvernightHarness(vf.Harness[OvernightHarnessConfig]):
             str(self._root),
             "--clean-env",
         ]
-        for name in passed:
+        for name in kept_in_clean_env:
             command += ["--pass-env", name]
         if self.config.keep:
             command.append("--keep")
@@ -170,8 +185,9 @@ class OvernightHarness(vf.Harness[OvernightHarnessConfig]):
         try:
             stdout, stderr = await process.communicate(line.encode() + b"\n")
         except BaseException:
-            trace.info[UNANSWERED] = forwarder.unanswered
-            await asyncio.shield(_stop(process))
+            unanswered_before_stop = forwarder.unanswered
+            trace.info[UNANSWERED_WHEN_CANCELLED] = unanswered_before_stop
+            await asyncio.shield(_interrupt_then_kill_group(process))
             raise
         lines = stdout.decode().strip().splitlines()
         if process.returncode != 0 or not lines:
@@ -182,13 +198,13 @@ class OvernightHarness(vf.Harness[OvernightHarnessConfig]):
         return json.loads(lines[-1])
 
 
-async def _stop(process: asyncio.subprocess.Process) -> None:
+async def _interrupt_then_kill_group(process: asyncio.subprocess.Process) -> None:
     if process.returncode is not None:
         return
     with contextlib.suppress(ProcessLookupError):
         process.send_signal(signal.SIGINT)
     try:
-        await asyncio.wait_for(process.wait(), STOP_SECONDS)
+        await asyncio.wait_for(process.wait(), INTERRUPT_GRACE_SECONDS)
     except TimeoutError:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGKILL)

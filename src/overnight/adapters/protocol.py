@@ -2,7 +2,7 @@ from typing import Literal
 
 from pydantic import TypeAdapter
 
-from overnight.domain.contracts import Contract, HarnessRequirements, JsonObject, Text
+from overnight.domain.contracts import Contract, HarnessRequirements, JsonObject, TrimmedText
 
 
 class Hello(Contract):
@@ -15,20 +15,20 @@ class Observe(Contract):
     kind: Literal["observe"]
     chat_id: str
     observation: JsonObject
-    request_id: Text | None = None
-    session_id: Text | None = None
-    turn_id: Text | None = None
-    message_id: Text | None = None
+    request_id: TrimmedText | None = None
+    session_id: TrimmedText | None = None
+    turn_id: TrimmedText | None = None
+    message_id: TrimmedText | None = None
 
 
 class Steer(Contract):
     kind: Literal["steer"]
-    request_id: Text
-    chat_id: Text
-    session_id: Text
-    turn_id: Text
-    message: Text
-    message_id: Text
+    request_id: TrimmedText
+    chat_id: TrimmedText
+    session_id: TrimmedText
+    turn_id: TrimmedText
+    message: TrimmedText
+    message_id: TrimmedText
 
 
 class Lifecycle(Contract):

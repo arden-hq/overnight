@@ -4,7 +4,13 @@ from typing import Self
 
 from pydantic import Field, model_validator
 
-from overnight.domain.contracts import JsonObject, NameSet, Omittable, OmittableNameSet, Text
+from overnight.domain.contracts import (
+    JsonObject,
+    Omittable,
+    OmittableSortedNames,
+    SortedNames,
+    TrimmedText,
+)
 from overnight.domain.models import Actor, Context
 from overnight.domain.values import instant
 from overnight.domain.vocabulary import NotificationKind
@@ -21,13 +27,13 @@ def event_time(value: str) -> datetime:
 
 
 class CalendarEvent(State):
-    id: Text
-    owner_id: Text
-    title: Text
-    start: Text
-    end: Text
-    location: Text | None = None
-    attendees: NameSet = Field(default_factory=list)
+    id: TrimmedText
+    owner_id: TrimmedText
+    title: TrimmedText
+    start: TrimmedText
+    end: TrimmedText
+    location: TrimmedText | None = None
+    attendees: SortedNames = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_interval(self) -> Self:
@@ -46,24 +52,24 @@ class CalendarState(State):
 
 
 class CalendarList(Parameters):
-    from_time: Omittable[Text] = Field(default_factory=lambda: None, alias="from")
-    to: Omittable[Text] = Field(default_factory=lambda: None)
+    from_time: Omittable[TrimmedText] = Field(default_factory=lambda: None, alias="from")
+    to: Omittable[TrimmedText] = Field(default_factory=lambda: None)
 
 
 class CalendarCreate(Parameters):
-    title: Text
-    start: Text
-    end: Text
-    location: Omittable[Text] = Field(default_factory=lambda: None)
-    attendees: NameSet = Field(default_factory=list)
+    title: TrimmedText
+    start: TrimmedText
+    end: TrimmedText
+    location: Omittable[TrimmedText] = Field(default_factory=lambda: None)
+    attendees: SortedNames = Field(default_factory=list)
 
 
 class CalendarUpdate(IdArgument):
-    title: Omittable[Text] = Field(default_factory=lambda: None)
-    start: Omittable[Text] = Field(default_factory=lambda: None)
-    end: Omittable[Text] = Field(default_factory=lambda: None)
-    location: Text | None = Field(default_factory=lambda: None)
-    attendees: OmittableNameSet = Field(default_factory=lambda: None)
+    title: Omittable[TrimmedText] = Field(default_factory=lambda: None)
+    start: Omittable[TrimmedText] = Field(default_factory=lambda: None)
+    end: Omittable[TrimmedText] = Field(default_factory=lambda: None)
+    location: TrimmedText | None = Field(default_factory=lambda: None)
+    attendees: OmittableSortedNames = Field(default_factory=lambda: None)
 
 
 def _event_visible(row: CalendarEvent, actor_id: str) -> bool:

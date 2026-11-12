@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Overnight</title>
     <script>
-      (function () {
+      (function setThemeBeforeFirstPaint() {
         var t = new URLSearchParams(location.search).get("theme");
         try {
           t = t || localStorage.getItem("overnight-theme");

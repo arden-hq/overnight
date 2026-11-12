@@ -3,7 +3,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
 
-from overnight.domain.contracts import JsonObject, Nonnegative, Omittable, Text
+from overnight.domain.contracts import JsonObject, Nonnegative, Omittable, TrimmedText
 from overnight.domain.models import Actor, Context, Transition
 from overnight.services.common import find_row, next_id
 from overnight.services.operations import (
@@ -20,12 +20,12 @@ type Seconds = Annotated[int, Field(ge=1)]
 
 
 class Reminder(State):
-    id: Text
-    owner_id: Text
-    chat_id: Text | None = None
-    task_id: Text | None = None
+    id: TrimmedText
+    owner_id: TrimmedText
+    chat_id: TrimmedText | None = None
+    task_id: TrimmedText | None = None
     due: Nonnegative
-    message: Text
+    message: TrimmedText
     created_at: Nonnegative
     status: Literal["scheduled", "fired", "cancelled"] = "scheduled"
 
@@ -42,7 +42,7 @@ class SystemState(State):
 class ReminderSet(Parameters):
     """Exactly one of ``at`` (an absolute world time) or ``delay`` (seconds from now)."""
 
-    message: Text
+    message: TrimmedText
     at: Omittable[Nonnegative] = Field(default_factory=lambda: None)
     delay: Omittable[Seconds] = Field(default_factory=lambda: None)
 
