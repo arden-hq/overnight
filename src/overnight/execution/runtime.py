@@ -80,7 +80,7 @@ from overnight.execution.provenance import (
 )
 from overnight.execution.scenario import ResolvedScenario, construct_world
 from overnight.execution.usage import NO_CALLS, UNMEASURED, ProcessUsage, read_usage
-from overnight.world.engine import InvocationRejected
+from overnight.world.engine import InvocationRejected, TraceSink
 
 
 @dataclass
@@ -197,12 +197,17 @@ class Trial:
         scenario: ResolvedScenario,
         agent: AgentAdapter,
         operator_transport: OperatorTransport | None = None,
+        trace_sink: TraceSink | None = None,
     ) -> None:
         self.scenario = scenario
         self.backend_provenance = backend_provenance()
         self.config = scenario.config
         self.actors = execution_actors(self.config.actors)
-        self.world = construct_world(self.config, service_definitions=scenario.service_definitions)
+        self.world = construct_world(
+            self.config,
+            service_definitions=scenario.service_definitions,
+            trace_sink=trace_sink,
+        )
         self.initial_snapshot = self.world.snapshot_for_evaluator()
         self.policy = ExecutionPolicy(self.config.operator.policy)
         self.schedule = OperatorSchedule(self.config.operator.steps)
@@ -914,6 +919,7 @@ def run_scenario(
     operator_transport: OperatorTransport | None = None,
     capture: bool = False,
     policy_port: int | None = None,
+    trace_sink: TraceSink | None = None,
 ) -> RunResult:
     """Run and grade a scenario, closing only adapters created by this function.
 
@@ -922,7 +928,8 @@ def run_scenario(
     operator: a model transport, recorded answers, or a test fake. ``capture`` (training only)
     asks the agent's processes to store their model calls beside their sidecars in
     ``agent_folder``. ``policy_port`` (training only) lets a contained agent reach that one port
-    of the host, where the trainer serves its policy, at ``policy_url``."""
+    of the host, where the trainer serves its policy, at ``policy_url``. ``trace_sink`` receives
+    each trace entry as the world records it, so the caller can persist a run in progress."""
     training = Training(capture, policy_port)
     if training.requested and (agent_folder is None or adapter is not None or adapters is not None):
         raise AdapterError("training needs an agent folder and adapters this run creates")
@@ -941,20 +948,30 @@ def run_scenario(
             agent_folder=agent_folder,
             operator_transport=operator_transport,
             training=training,
+            trace_sink=trace_sink,
         )
     if adapters is not None:
         raise AdapterError("per-chat adapters require a scenario with tasks")
     if adapter is not None:
-        return Trial(scenario, adapter, operator_transport).run()
+        return Trial(scenario, adapter, operator_transport, trace_sink).run()
     if isinstance(scenario.config.agent, (CommandAgent, HarnessAgent)):
         if agent_folder is not None:
             agent_folder.mkdir(mode=0o700)
             return _run_owned(
-                scenario, agent_folder / "connector.json", operator_transport, training
+                scenario,
+                agent_folder / "connector.json",
+                operator_transport,
+                training,
+                trace_sink,
             )
         with TemporaryDirectory(prefix="overnight-provenance-") as directory:
-            return _run_owned(scenario, Path(directory) / "connector.json", operator_transport)
-    return _run_owned(scenario, None, operator_transport)
+            return _run_owned(
+                scenario,
+                Path(directory) / "connector.json",
+                operator_transport,
+                trace_sink=trace_sink,
+            )
+    return _run_owned(scenario, None, operator_transport, trace_sink=trace_sink)
 
 
 def _run_owned(
@@ -962,6 +979,7 @@ def _run_owned(
     provenance_path: Path | None,
     operator_transport: OperatorTransport | None,
     training: Training = NO_TRAINING,
+    trace_sink: TraceSink | None = None,
 ) -> RunResult:
     if training.requested:
         owned = make_adapter(scenario.config.agent, provenance_path, training)
@@ -971,7 +989,7 @@ def _run_owned(
         owned = make_adapter(scenario.config.agent)
     trial: Trial | None = None
     try:
-        trial = Trial(scenario, owned, operator_transport)
+        trial = Trial(scenario, owned, operator_transport, trace_sink)
         trial.execute()
     finally:
         try:

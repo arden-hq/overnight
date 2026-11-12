@@ -1,3 +1,4 @@
+import json
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -111,9 +112,25 @@ class InspectionReport(InspectionContract):
     native_evidence: Literal["separate and unsupported"] = "separate and unsupported"
 
 
+def trace_lines(data: bytes) -> list[str]:
+    """Split a trace file into lines, numbered from the first.
+
+    A run appends to its trace while it runs, so a reader can see the last line half written:
+    a last line with no newline that is not yet whole JSON is left out."""
+    ended, newline, last = data.rpartition(b"\n")
+    lines = (ended + newline).decode("utf-8").splitlines()
+    if last.strip():
+        try:
+            json.loads(last)
+        except ValueError:
+            return lines
+        lines.append(last.decode("utf-8"))
+    return lines
+
+
 def load_trace(path: Path) -> tuple[TraceRecord, ...]:
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        lines = trace_lines(path.read_bytes())
     except (OSError, UnicodeError) as error:
         raise InspectionError(f"cannot read trace {path}: {error}") from error
     records: list[TraceRecord] = []

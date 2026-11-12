@@ -1,4 +1,4 @@
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from types import MappingProxyType
 
 from pydantic import JsonValue, ValidationError
@@ -44,6 +44,9 @@ def _failure_message(error: ValueError) -> str:
 class InvocationRejected(ValueError): ...
 
 
+type TraceSink = Callable[[TraceEntry], None]
+
+
 class World:
     def __init__(
         self,
@@ -56,6 +59,7 @@ class World:
         events: Iterable[Event] = (),
         faults: Iterable[FaultSpec] = (),
         seed: int = 0,
+        trace_sink: TraceSink | None = None,
     ) -> None:
         if type(start_time) is not int or type(horizon) is not int or type(seed) is not int:
             raise ValueError("start_time, horizon and seed must be integers")
@@ -76,6 +80,7 @@ class World:
         self._results: dict[str, Result] = {}
         self._result_owners: dict[str, tuple[str, str | None]] = {}
         self._trace: list[TraceEntry] = []
+        self._trace_sink = trace_sink
         self._queue = EventQueue()
         self._invocation_ids: set[str] = set()
         self._validate_grants()
@@ -199,6 +204,8 @@ class World:
             }
         )
         self._trace.append(entry)
+        if self._trace_sink is not None:
+            self._trace_sink(entry)
         return entry
 
     def _schedule_events(

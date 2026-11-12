@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import type { RunDetail } from "../api/types";
 import { runPath, runsOf, scenarioOfRun, useCatalog, useResource } from "../lib/api";
+import { useRunningRunId } from "../lib/operation";
 import { openPeek, usePeek } from "../lib/peek";
 import { go, href, SECTIONS, type Route, type Section } from "../lib/router";
 import { isVariant, runTitle, servicesOf, summaryStatus } from "../lib/run";
@@ -56,6 +57,7 @@ export function Sidebar({ route, view, theme, onTheme }: { route: Route; view: S
     writeStorageIfAllowed("overnight-sidebar", collapsed ? "collapsed" : "open");
   }, [collapsed]);
   const { scenarios, runs } = useCatalog();
+  const runningId = useRunningRunId();
   const peek = usePeek();
   const recent = useRecent();
   const runId = route.page === "run" ? route.id : null;
@@ -162,7 +164,7 @@ export function Sidebar({ route, view, theme, onTheme }: { route: Route; view: S
           <div className="snav-group">
             {!collapsed && <h3 className="snav-h">Runs</h3>}
             {scenarioRuns.slice(0, RUN_LIMIT).map((r) => {
-              const status = summaryStatus(r);
+              const status = r.id === runningId ? "running" : summaryStatus(r);
               return (
                 <Item
                   key={r.id}

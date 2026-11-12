@@ -53,10 +53,16 @@ export function buildScale(times: number[], end: number, unit = COLUMN): Scale {
   return { x: xOf, t: tOf, width: x, segments, unit };
 }
 
-export function fitScale(times: number[], end: number, avail: number): Scale {
-  const first = buildScale(times, end);
-  if (!avail || first.width >= avail) return first;
-  const folds = first.segments.filter((s) => s.fold).length * FOLD_PX;
-  const open = first.width - folds;
-  return buildScale(times, end, (COLUMN * (avail - folds)) / Math.max(1, open));
+export const MIN_UNIT = 12;
+export const MAX_UNIT = 480;
+
+export type Zoom = "fit" | number;
+
+export function fitScale(times: number[], end: number, avail: number, zoom: Zoom = COLUMN): Scale {
+  const natural = buildScale(times, end);
+  const folds = natural.segments.filter((s) => s.fold).length * FOLD_PX;
+  const open = natural.width - folds;
+  const fillsView = avail ? Math.max(MIN_UNIT, (COLUMN * (avail - folds)) / Math.max(1, open)) : 0;
+  const unit = zoom === "fit" ? fillsView || COLUMN : Math.max(zoom, fillsView);
+  return buildScale(times, end, unit);
 }

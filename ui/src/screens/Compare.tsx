@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import type { ComparedCheck, RunComparison, RunDetail, RunSummary, TraceStep } from "../api/types";
 import { runPath, runsOf, useCatalog, useEntries, useResource } from "../lib/api";
 import { go, href } from "../lib/router";
 import { chipsFor, distinctTimes, isVariant, LANES, modelName, rowsFor, runStatus, runTitle, summaryStatus } from "../lib/run";
-import { clock, fitScale } from "../lib/time";
+import { clock } from "../lib/time";
 import { useWidth } from "../lib/useWidth";
+import { useZoom } from "../lib/zoom";
 import { LAYERS, STATUS_WORD } from "../lib/verdict";
 import type { Chip, RowDef } from "../types";
 import { Picker } from "../components/Picker";
@@ -61,7 +62,7 @@ function CompareView({ a, b, diff }: { a: RunDetail; b: RunDetail; diff: RunComp
   const chips = useMemo(() => [...left.chips, ...right.chips], [left, right]);
   const rows = useMemo(() => mergeRows(left.rows, right.rows), [left, right]);
   const times = useMemo(() => distinctTimes(chips), [chips]);
-  const scale = useMemo(() => fitScale(times, times.at(-1) ?? 0, avail), [times, avail]);
+  const { scale, zoom } = useZoom(times, times.at(-1) ?? 0, avail);
   const d = diff.divergence;
   const marked = useMemo(() => {
     const ids = new Set<string>();
@@ -76,10 +77,13 @@ function CompareView({ a, b, diff }: { a: RunDetail; b: RunDetail; diff: RunComp
   const { entries, error } = useEntries(selRun, sel?.lines ?? null);
   const diffTimes = [d?.a?.time, d?.b?.time].filter((t): t is number => typeof t === "number");
   const divergeAt = diffTimes.length ? Math.min(...diffTimes) : undefined;
+  const revealed = useRef<ReadonlySet<string> | null>(null);
   useEffect(() => {
+    if (!avail || revealed.current === marked) return;
     const chip = [...(box.current?.querySelectorAll<HTMLElement>(".chip.marked") ?? [])].at(-1);
     const scroller = chip?.closest<HTMLElement>(".tl-scroll");
     if (!chip || !scroller) return;
+    revealed.current = marked;
     const c = chip.getBoundingClientRect();
     const s = scroller.getBoundingClientRect();
     const top = s.top + RULER;
@@ -88,7 +92,7 @@ function CompareView({ a, b, diff }: { a: RunDetail; b: RunDetail; diff: RunComp
     else if (c.top < top) scroller.scrollTop -= top - c.top + 12;
     if (c.right > s.right) scroller.scrollLeft += c.right - s.right + 24;
     else if (c.left < left) scroller.scrollLeft -= left - c.left + 24;
-  }, [marked, box, scale]);
+  }, [marked, box, scale, avail]);
 
   const summaryA = runs.find((r) => r.id === a.id);
   const summaryB = runs.find((r) => r.id === b.id);
@@ -114,7 +118,7 @@ function CompareView({ a, b, diff }: { a: RunDetail; b: RunDetail; diff: RunComp
       <p className={cn("summary truncate", d && "cmp-diverged")} title={differenceLine(diff)}>
         {differenceLine(diff)}
       </p>
-      <Timeline rows={rows} chips={chips} scale={scale} playhead={divergeAt} label={d ? "First difference" : "Time"} dimFuture={false} selection={sel?.id} onSelect={setSel} marked={marked} />
+      <Timeline rows={rows} chips={chips} scale={scale} playhead={divergeAt} label={d ? "First difference" : "Time"} dimFuture={false} selection={sel?.id} onSelect={setSel} marked={marked} zoom={zoom} />
       {sel && (
         <div className="viewer-selected">
           <div className="selected-tool">

@@ -11,6 +11,7 @@ const TINT: Record<RunStatus, string> = {
   fail: "bg-fail/12 text-fail",
   unknown: "border-dashed border-border text-muted-foreground bg-transparent",
   incomplete: "border-dashed border-border text-muted-foreground bg-transparent",
+  running: "border-border text-foreground bg-transparent",
 };
 
 export function StatusBadge({ status, className }: { status: RunStatus; className?: string }) {

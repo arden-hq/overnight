@@ -36,6 +36,7 @@ from overnight.execution.inspection import (
     TraceRecord,
     load_trace,
     query_trace,
+    trace_lines,
 )
 from overnight.execution.run_view import (
     LAYERS,
@@ -438,14 +439,14 @@ class RunStore:
 
     def _raw_trace(self, location: RunLocation) -> tuple[list[tuple[int, JsonValue]], list[str]]:
         try:
-            text = _read_bytes(location.artifact("trace.jsonl")).decode("utf-8")
+            lines = trace_lines(_read_bytes(location.artifact("trace.jsonl")))
         except FileNotFoundError:
             return [], ["no trace recorded: the run did not finish"]
         except (OSError, UnicodeError) as error:
             return [], [f"trace unreadable: {error}"]
         rows: list[tuple[int, JsonValue]] = []
         issues: list[str] = []
-        for number, line in enumerate(text.splitlines(), start=1):
+        for number, line in enumerate(lines, start=1):
             if not line.strip():
                 continue
             try:

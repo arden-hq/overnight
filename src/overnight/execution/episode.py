@@ -38,6 +38,7 @@ from overnight.execution.provenance import read_connector_sidecars
 from overnight.execution.runtime import Lane, LaneStatus, RunResult, Trial
 from overnight.execution.scenario import ResolvedScenario
 from overnight.execution.usage import read_usage
+from overnight.world.engine import TraceSink
 
 
 @dataclass(kw_only=True)
@@ -69,6 +70,7 @@ class Episode(Trial):
         scenario: ResolvedScenario,
         adapters: Mapping[str, AgentAdapter],
         operator_transport: OperatorTransport | None = None,
+        trace_sink: TraceSink | None = None,
     ) -> None:
         if not scenario.config.tasks:
             raise AdapterError("episode requires at least one task")
@@ -78,7 +80,9 @@ class Episode(Trial):
         for chat_id, adapter in adapters.items():
             if isinstance(adapter, HarnessAdapter):
                 adapter.bind_chat(chat_id)
-        super().__init__(scenario, adapters[scenario.config.tasks[0].chat_id], operator_transport)
+        super().__init__(
+            scenario, adapters[scenario.config.tasks[0].chat_id], operator_transport, trace_sink
+        )
         self.adapters = dict(adapters)
         self.tasks = cast(list[TaskState], self.lanes)
         self.invocation_owners: dict[str, tuple[str, str]] = {}
@@ -397,16 +401,21 @@ def run_episode(
     agent_folder: Path | None = None,
     operator_transport: OperatorTransport | None = None,
     training: Training = NO_TRAINING,
+    trace_sink: TraceSink | None = None,
 ) -> RunResult:
     if adapters is not None:
-        return Episode(scenario, adapters, operator_transport).run()
+        return Episode(scenario, adapters, operator_transport, trace_sink).run()
     if isinstance(scenario.config.agent, (CommandAgent, HarnessAgent)):
         if agent_folder is not None:
             agent_folder.mkdir(mode=0o700)
-            return _run_owned_episode(scenario, agent_folder, operator_transport, training)
+            return _run_owned_episode(
+                scenario, agent_folder, operator_transport, training, trace_sink
+            )
         with TemporaryDirectory(prefix="overnight-episode-provenance-") as directory:
-            return _run_owned_episode(scenario, Path(directory), operator_transport)
-    return _run_owned_episode(scenario, None, operator_transport)
+            return _run_owned_episode(
+                scenario, Path(directory), operator_transport, trace_sink=trace_sink
+            )
+    return _run_owned_episode(scenario, None, operator_transport, trace_sink=trace_sink)
 
 
 def _run_owned_episode(
@@ -414,6 +423,7 @@ def _run_owned_episode(
     provenance_root: Path | None,
     operator_transport: OperatorTransport | None,
     training: Training = NO_TRAINING,
+    trace_sink: TraceSink | None = None,
 ) -> RunResult:
     owned: dict[str, ManagedAdapter] = {}
     trial: Episode | None = None
@@ -432,7 +442,7 @@ def _run_owned_episode(
                     owned[task.chat_id] = make_adapter(scenario.config.agent, path)
                 else:
                     owned[task.chat_id] = make_adapter(scenario.config.agent)
-        trial = Episode(scenario, owned, operator_transport)
+        trial = Episode(scenario, owned, operator_transport, trace_sink)
         trial.execute()
     finally:
         for chat_id, adapter in reversed(owned.items()):

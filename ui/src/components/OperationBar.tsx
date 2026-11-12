@@ -66,6 +66,11 @@ export function OperationBar() {
     });
   }, [operation, refresh]);
 
+  const runId = operation?.run_id;
+  useEffect(() => {
+    if (runId) void refresh();
+  }, [runId, refresh]);
+
   if (!operation && !error) return null;
   if (operation && dismissed === operation.id && operation.state !== "running") return null;
   const running = operation?.state === "running";
@@ -90,9 +95,9 @@ export function OperationBar() {
           </Popover>
           {error && <span className="text-fail truncate">{error}</span>}
           <span className="grow" />
-          {operation.run_id && !running && (
+          {operation.run_id && (
             <Button variant="outline" size="xs" onClick={() => go(href.run(operation.run_id!))}>
-              Open run
+              {running ? "Watch" : "Open run"}
             </Button>
           )}
           {running ? (

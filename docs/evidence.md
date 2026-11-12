@@ -7,7 +7,7 @@
 | `resolved-scenario.json` | The scenario after overrides, variation and defaults |
 | `variation.json` | The validated variation, when `--variation` was given |
 | `overrides.json` | The overrides as given, when `--overrides` was given |
-| `trace.jsonl` | The append-only world trace, one canonical `TraceEntry` per line |
+| `trace.jsonl` | The append-only world trace, one canonical `TraceEntry` per line. Each entry is appended as the world records it, so the file can be read while the run is in progress; a reader leaves out a last line that is not yet whole |
 | `final-state.json` | The final evaluator snapshot |
 | `usage.json` | Wall-clock `seconds` measured by the runner, plus the agent's model `calls`, tokens and `cost_usd`, and the operator persona's own under `operator` (zero for a scripted operator or a replay). Null means not measured, never zero |
 | `verdict.json` | Verdict, check results, pending work and any `failure`. Written last, so its presence marks complete evidence |

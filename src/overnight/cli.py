@@ -5,7 +5,10 @@ import shutil
 import signal
 import tempfile
 import time
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import TextIO
 
 import anyio
 import click
@@ -15,6 +18,7 @@ from overnight.adapters.http import serve_http
 from overnight.adapters.operator_model import ModelTransport
 from overnight.adapters.suite_runner import read_report, resume_suite, run_suite
 from overnight.adapters.workbench import WorkbenchConfig, create_app, response_schema
+from overnight.domain.models import TraceEntry
 from overnight.domain.values import json_value
 from overnight.domain.vocabulary import Verdict
 from overnight.execution.inspection import InspectionError, TraceQuery, inspect_trace
@@ -74,10 +78,46 @@ def _check_qa_files(path: Path, suite: Suite) -> None:
                 ) from error
 
 
-def _write_private(path: Path, content: str) -> None:
+@contextmanager
+def _open_private(path: Path) -> Generator[TextIO]:
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+        yield output
+
+
+def _write_private(path: Path, content: str) -> None:
+    with _open_private(path) as output:
         output.write(content)
+
+
+class _TraceFile:
+    """Appends each trace entry as one line while the run is in progress.
+
+    The run survives a failed write, since the runner turns an error raised inside a call into
+    a run failure; the first write error is kept and ``raise_write_error`` reports it."""
+
+    def __init__(self, output: TextIO) -> None:
+        self._output = output
+        self._write_error: OSError | None = None
+
+    def append(self, entry: TraceEntry) -> None:
+        if self._write_error is not None:
+            return
+        try:
+            self._write(entry)
+        except OSError as error:
+            self._write_error = error
+
+    def _write(self, entry: TraceEntry) -> None:
+        line = json.dumps(
+            entry.model_dump(mode="json"), sort_keys=True, ensure_ascii=False, allow_nan=False
+        )
+        self._output.write(line + "\n")
+        self._output.flush()
+
+    def raise_write_error(self) -> None:
+        if self._write_error is not None:
+            raise self._write_error
 
 
 def _write_json(path: Path, value: JsonValue) -> None:
@@ -167,11 +207,15 @@ def run(
         _write_json(out / "variation.json", variation_config.model_dump(mode="json"))
     started = time.monotonic()
     try:
-        result = run_scenario(
-            resolved,
-            agent_folder=out / "agent",
-            operator_transport=operator_transport,
-        )
+        with _open_private(out / "trace.jsonl") as output:
+            trace = _TraceFile(output)
+            result = run_scenario(
+                resolved,
+                agent_folder=out / "agent",
+                operator_transport=operator_transport,
+                trace_sink=trace.append,
+            )
+            trace.raise_write_error()
         _write_json(
             out / "usage.json",
             {
@@ -184,13 +228,6 @@ def run(
         _write_json(out / "provenance.json", result.provenance)
         if result.task_outcomes is not None:
             _write_json(out / "task-outcomes.json", json_value(result.task_outcomes))
-        _write_private(
-            out / "trace.jsonl",
-            "".join(
-                json.dumps(entry, sort_keys=True, ensure_ascii=False, allow_nan=False) + "\n"
-                for entry in result.trace
-            ),
-        )
         _write_json(out / "verdict.json", result.verdict)
     except Exception as error:
         raise InfrastructureError(error) from error

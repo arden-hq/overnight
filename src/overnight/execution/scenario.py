@@ -34,7 +34,7 @@ from overnight.domain.values import json_object
 from overnight.domain.vocabulary import SYSTEM_SERVICE, WILDCARD, ActorRole
 from overnight.services.catalog import BUILTIN_SERVICES
 from overnight.services.operations import ServiceBoundary
-from overnight.world.engine import World
+from overnight.world.engine import TraceSink, World
 from overnight.world.predicates import state_targets
 
 _RESERVED = f"the {SYSTEM_SERVICE} service is reserved for the world and every agent"
@@ -395,7 +395,10 @@ def resolve_scenario(
 
 
 def construct_world(
-    doc: Scenario | JsonObject, *, service_definitions: Mapping[str, ServiceBoundary]
+    doc: Scenario | JsonObject,
+    *,
+    service_definitions: Mapping[str, ServiceBoundary],
+    trace_sink: TraceSink | None = None,
 ) -> World:
     config = doc if isinstance(doc, Scenario) else Scenario.model_validate(doc)
     services = [
@@ -410,4 +413,5 @@ def construct_world(
         events=config.events,
         faults=config.faults,
         seed=config.seed,
+        trace_sink=trace_sink,
     )

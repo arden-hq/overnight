@@ -1987,7 +1987,8 @@ blockquote {
 .transport .task-picker {
   width: 220px;
 }
-.toggle-views {
+.toggle-views,
+.toggle-follow {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -2310,4 +2311,129 @@ blockquote {
   flex: none;
   max-height: 32vh;
   overflow: auto;
+}
+
+.tl-day {
+  justify-content: space-between;
+  gap: 2px;
+  padding-right: 4px;
+}
+.tl-zoom {
+  display: inline-flex;
+  flex: none;
+  margin-right: -4px;
+}
+.tl-overview {
+  display: flex;
+  height: 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--sunk);
+}
+.tl-overview-label {
+  position: static;
+  background: var(--sunk);
+  color: var(--muted);
+  font-size: 11px;
+}
+.tl-overview-track {
+  position: relative;
+  flex: 1;
+  cursor: grab;
+  touch-action: none;
+}
+.tl-overview-mark {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--line-strong);
+}
+.tl-overview-mark.fail {
+  top: 3px;
+  bottom: 3px;
+  background: var(--fail);
+}
+.tl-overview-now {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1.5px solid var(--text);
+}
+.tl-overview-view {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--panel);
+  border-inline: 1px solid var(--line-strong);
+  pointer-events: none;
+}
+.tl-overview-mark,
+.tl-overview-now {
+  z-index: 1;
+}
+.chip.compact {
+  justify-content: center;
+  padding: 0;
+  gap: 0;
+}
+.chip.chip-more.compact {
+  font-size: 10.5px;
+}
+.chip.unmatched {
+  background: var(--panel);
+  border-color: var(--line);
+  color: var(--faint);
+}
+.chip.unmatched svg,
+.chip.unmatched .chip-mark {
+  color: var(--faint);
+}
+
+.scenarios-table {
+  min-width: 1336px;
+}
+.scenarios-pinned,
+.scenarios-pinned-end {
+  position: sticky;
+  z-index: 1;
+  background: var(--panel);
+}
+.scenarios-pinned {
+  left: 0;
+  box-shadow: 1px 0 0 var(--line);
+}
+.scenarios-pinned-end {
+  right: 0;
+  box-shadow: -1px 0 0 var(--line);
+}
+.scenarios-table tr:hover > td.scenarios-pinned,
+.scenarios-table tr:hover > td.scenarios-pinned-end {
+  background: color-mix(in srgb, var(--sunk) 50%, var(--panel));
+}
+
+@media (max-width: 1280px) {
+  .viewer-frame {
+    position: relative;
+  }
+  .viewer-frame.peeking {
+    grid-template-columns: minmax(0, 1fr) 0px;
+  }
+  .peek {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 8;
+    width: min(var(--peek-w), calc(100% - 48px));
+    box-shadow: var(--shadow-5);
+  }
+}
+
+.compare > .pagehead {
+  flex-wrap: wrap;
+  height: auto;
+  min-height: 46px;
+  padding-block: 8px;
+  row-gap: 8px;
 }

@@ -49,7 +49,7 @@ export async function send<T>(method: string, path: string, payload?: unknown, h
 
 export const errorText = (cause: unknown): string => (cause instanceof ApiFailure ? `${cause.code}: ${cause.message}` : cause instanceof Error ? cause.message : String(cause));
 
-type Entry = { data?: unknown; error?: unknown; pending?: Promise<void> };
+type Entry = { data?: unknown; error?: unknown; pending?: Promise<void>; reloadAfter?: boolean };
 const cache = new Map<string, Entry>();
 const generation = new Map<string, number>();
 const listeners = new Set<() => void>();
@@ -61,19 +61,23 @@ const emit = () => {
 
 function load(path: string, force = false): void {
   const entry = cache.get(path);
-  if (entry?.pending || (entry && !force && (entry.data !== undefined || entry.error !== undefined))) return;
+  if (entry?.pending) {
+    if (force) entry.reloadAfter = true;
+    return;
+  }
+  if (entry && !force && (entry.data !== undefined || entry.error !== undefined)) return;
   const next: Entry = { ...entry };
   const started = generation.get(path) ?? 0;
   const current = () => (generation.get(path) ?? 0) === started;
+  const settle = (settled: Entry) => {
+    const reloadAfter = cache.get(path)?.reloadAfter;
+    cache.set(path, current() ? settled : { ...cache.get(path), pending: undefined, reloadAfter: undefined });
+    emit();
+    if (reloadAfter) load(path, true);
+  };
   next.pending = request<unknown>(path).then(
-    (data) => {
-      cache.set(path, current() ? { data } : { ...cache.get(path), pending: undefined });
-      emit();
-    },
-    (error: unknown) => {
-      cache.set(path, current() ? { error, data: entry?.data } : { ...cache.get(path), pending: undefined });
-      emit();
-    },
+    (data) => settle({ data }),
+    (error: unknown) => settle({ error, data: entry?.data }),
   );
   cache.set(path, next);
 }
@@ -212,7 +216,7 @@ export interface Snapshot {
   state: unknown;
 }
 
-export function useSnapshots(runId: string): { snapshots?: Snapshot[]; error?: string } {
+export function useSnapshots(runId: string, traceLength = 0): { snapshots?: Snapshot[]; error?: string } {
   const [state, setState] = useState<{ runId: string; snapshots?: Snapshot[]; error?: string }>({ runId: "" });
   useEffect(() => {
     let current = true;
@@ -247,7 +251,7 @@ export function useSnapshots(runId: string): { snapshots?: Snapshot[]; error?: s
     return () => {
       current = false;
     };
-  }, [runId]);
+  }, [runId, traceLength]);
   return state.runId === runId ? state : {};
 }
 

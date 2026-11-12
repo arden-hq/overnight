@@ -16,6 +16,8 @@ const RECENT = 5;
 
 const date = (iso: string | undefined) => (iso ? iso.slice(5, 10).replace("-", "/") : "");
 
+const COLUMN_WIDTHS = [220, 96, 120, 150, 150, 76, 84, 82, 60, 60, 120, 70, 48];
+
 export function Scenarios({ view }: { view: ScenarioView }) {
   const { scenarios, runs } = useCatalog();
   const [q, setQ] = useState("");
@@ -94,23 +96,15 @@ export function Scenarios({ view }: { view: ScenarioView }) {
       <div className="table-wrap">
         <Table className="scenarios-table table-fixed">
           <colgroup>
-            <col style={{ width: "24%" }} />
-            <col style={{ width: 150 }} />
-            <col style={{ width: 150 }} />
-            <col style={{ width: 76 }} />
-            <col style={{ width: 84 }} />
-            <col style={{ width: 82 }} />
-            <col style={{ width: 60 }} />
-            <col style={{ width: 60 }} />
-            <col style={{ width: "16%" }} />
-            <col style={{ width: 96 }} />
-            <col style={{ width: 150 }} />
-            <col style={{ width: 70 }} />
-            <col style={{ width: 48 }} />
+            {COLUMN_WIDTHS.map((width, i) => (
+              <col key={i} style={{ width }} />
+            ))}
           </colgroup>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead>Scenario</TableHead>
+              <TableHead className="scenarios-pinned">Scenario</TableHead>
+              <TableHead>Last run</TableHead>
+              <TableHead>Last {RECENT} runs</TableHead>
               <TableHead>Agent</TableHead>
               <TableHead>Services</TableHead>
               <TableHead className="text-right">Outcome</TableHead>
@@ -119,10 +113,8 @@ export function Scenarios({ view }: { view: ScenarioView }) {
               <TableHead className="text-right">Claims</TableHead>
               <TableHead className="text-right">Tasks</TableHead>
               <TableHead>Validity</TableHead>
-              <TableHead>Last run</TableHead>
-              <TableHead>Last {RECENT} runs</TableHead>
               <TableHead className="text-right">Updated</TableHead>
-              <TableHead aria-label="Run" />
+              <TableHead aria-label="Run" className="scenarios-pinned-end" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -131,12 +123,31 @@ export function Scenarios({ view }: { view: ScenarioView }) {
               const last = s.last_run;
               return (
                 <TableRow key={s.id} className="cursor-pointer" onClick={() => go(href.scenario(s.id))}>
-                  <TableCell>
+                  <TableCell className="scenarios-pinned">
                     <div className="scenario-name">
                       <span className="truncate" title={s.path}>
                         {s.id}
                       </span>
                     </div>
+                  </TableCell>
+                  <TableCell>
+                    {last ? (
+                      <button
+                        type="button"
+                        className="trials-link"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          go(href.run(last.id));
+                        }}
+                      >
+                        <StatusWord status={runStatus(last.verdict)} />
+                      </button>
+                    ) : (
+                      <span className="text-muted-foreground">Never run</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <TrialsSummary trials={mine.slice(0, RECENT).map(summaryStatus)} />
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     <span className="truncate">{agentWord(s.agent_kind)}</span>
@@ -166,27 +177,8 @@ export function Scenarios({ view }: { view: ScenarioView }) {
                       {s.valid ? "Valid" : `Invalid: ${s.error ?? "unknown error"}`}
                     </span>
                   </TableCell>
-                  <TableCell>
-                    {last ? (
-                      <button
-                        type="button"
-                        className="trials-link"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          go(href.run(last.id));
-                        }}
-                      >
-                        <StatusWord status={runStatus(last.verdict)} />
-                      </button>
-                    ) : (
-                      <span className="text-muted-foreground">Never run</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <TrialsSummary trials={mine.slice(0, RECENT).map(summaryStatus)} />
-                  </TableCell>
                   <TableCell className="text-right text-muted-foreground tabular-nums">{date(last?.modified)}</TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="scenarios-pinned-end text-right">
                     <RunButton scenario={s} compact />
                   </TableCell>
                 </TableRow>

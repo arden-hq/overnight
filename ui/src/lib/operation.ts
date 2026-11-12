@@ -39,6 +39,11 @@ export function useOperation(): State {
   );
 }
 
+export function useRunningRunId(): string | null {
+  const { operation } = useOperation();
+  return operation?.state === "running" ? operation.run_id : null;
+}
+
 export function adoptOperation(status: StatusResponse | undefined) {
   const operation = status?.operation;
   if (!operation || state.operation?.id === operation.id) return;

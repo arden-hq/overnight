@@ -43,6 +43,9 @@ import {
   User,
   Wrench,
   X,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
   Zap,
   type LucideIcon,
 } from "lucide-react";
@@ -96,6 +99,9 @@ const ICONS: Record<string, LucideIcon> = {
   trash: Trash2,
   stop: Square,
   json: Braces,
+  zoomin: ZoomIn,
+  zoomout: ZoomOut,
+  fit: Maximize2,
 };
 
 export function Icon({ name, size = 14, className }: { name: string; size?: number; className?: string }) {

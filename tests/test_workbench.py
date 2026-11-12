@@ -20,7 +20,10 @@ from overnight.adapters.workbench import WorkbenchConfig, create_app, scenario_b
 from overnight.cli import cli
 from overnight.domain.contracts import Checks
 from overnight.domain.values import JsonObject
+from overnight.execution.adapters import ScriptedAdapter
 from overnight.execution.run_view import RunArtifacts, build_run_detail
+from overnight.execution.runtime import run_scenario
+from overnight.execution.scenario import load_json, resolve_scenario
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
@@ -541,3 +544,61 @@ def test_run_detail_reports_why_a_run_failed() -> None:
     assert detail.failure is not None and detail.failure.kind == "agent"
     assert detail.failure.message == "died"
     assert detail.rejected_actions == 2
+
+
+def test_a_run_in_progress_is_readable_and_its_trace_ends_as_one_write_would(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    client = Client(create_app(WorkbenchConfig(runs_roots=[runs], scenarios_roots=[])))
+    seen: list[tuple[int, object, list[str]]] = []
+    respond = ScriptedAdapter.respond
+
+    def respond_after_reading_the_run(self: ScriptedAdapter, observation: JsonObject):
+        run = client.get("/api/runs/0~live").json()
+        seen.append((len(run["timeline"]), run["verdict"], run["issues"]))
+        return respond(self, observation)
+
+    monkeypatch.setattr(ScriptedAdapter, "respond", respond_after_reading_the_run)
+    scenario = EXAMPLES / "catering-chaos.json"
+    result = CliRunner().invoke(cli, ["run", str(scenario), "--out", str(runs / "live")])
+    assert result.exit_code == 0, result.output
+
+    lengths = [length for length, _, _ in seen]
+    assert lengths == sorted(lengths) and len(set(lengths)) > 2
+    assert all(verdict is None and not issues for _, verdict, issues in seen)
+    finished = client.get("/api/runs/0~live").json()
+    assert finished["verdict"] == "passed" and len(finished["timeline"]) > lengths[-1]
+
+    trace = runs / "live" / "trace.jsonl"
+    monkeypatch.undo()
+    written_at_once = "".join(
+        json.dumps(entry, sort_keys=True, ensure_ascii=False, allow_nan=False) + "\n"
+        for entry in run_scenario(resolve_scenario(load_json(scenario))).trace
+    )
+    assert trace.read_bytes() == written_at_once.encode("utf-8")
+    assert trace.stat().st_mode & 0o777 == 0o600
+
+    with trace.open("ab") as output:
+        output.write(
+            '{"sequence": 999, "kind": "invocation", "payload": {"note": "caf\xc3'.encode("latin-1")
+        )
+    torn = client.get("/api/runs/0~live").json()
+    assert torn["issues"] == [] and len(torn["timeline"]) == len(finished["timeline"])
+    assert client.get("/api/runs/0~live/trace", params={"kind": "fault"}).json()["matched"] == 1
+
+
+def test_a_run_whose_trace_cannot_be_written_leaves_no_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    def full_disk(self: object, entry: object) -> None:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr("overnight.cli._TraceFile._write", full_disk)
+    out = tmp_path / "run"
+    result = CliRunner().invoke(
+        cli, ["run", str(EXAMPLES / "catering-chaos.json"), "--out", str(out)]
+    )
+    assert result.exit_code != 0
+    assert not (out / "verdict.json").exists()

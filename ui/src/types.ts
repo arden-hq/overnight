@@ -28,4 +28,4 @@ export interface Chip {
   service?: string;
 }
 
-export type RunStatus = "pass" | "fail" | "unknown" | "incomplete" | "ungraded";
+export type RunStatus = "pass" | "fail" | "unknown" | "incomplete" | "ungraded" | "running";

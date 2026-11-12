@@ -1,15 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
+import { Kbd } from "@/components/ui/kbd";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { RunDetail } from "../api/types";
 import { runPath, runsOf, scenarioOfRun, stateAt, useCatalog, useEntries, useResource, useSnapshots } from "../lib/api";
+import { useOperation } from "../lib/operation";
 import { openPeek, usePeek } from "../lib/peek";
 import { go, href } from "../lib/router";
 import { actorsOf, arr, chipsFor, distinctTimes, isVariant, modelName, obj, rowsFor, runStatus, runTitle, servicesOf } from "../lib/run";
-import { clock, fitScale } from "../lib/time";
+import { isPlainKey } from "../lib/keys";
+import { clock } from "../lib/time";
 import { useWidth } from "../lib/useWidth";
+import { useZoom } from "../lib/zoom";
 import type { Chip } from "../types";
 import { AppWindow } from "../components/AppWindow";
 import { Hint } from "../components/Hint";
@@ -24,14 +29,20 @@ import { failureLabel, verdictLine } from "../lib/verdict";
 import { Unavailable } from "../components/Unavailable";
 
 let peekOpenedOnce = false;
+const PEEK_OVERLAYS = "(max-width: 1280px)";
 
 const PLAY_PX_PER_S = 200;
 
 export function Viewer({ runId }: { runId: string }) {
   const { data, error, reload } = useResource<RunDetail>(runPath(runId));
+  const { operation } = useOperation();
+  const watched = operation?.run_id === runId ? operation : null;
+  useEffect(() => {
+    if (watched) reload();
+  }, [watched, reload]);
   if (error && !data) return <Unavailable what={`run ${runId}`} error={error} onRetry={reload} />;
   if (!data) return <p className="empty pad">Loading the run…</p>;
-  return <RunView key={data.id} run={data} />;
+  return <RunView key={data.id} run={data} live={watched?.state === "running"} />;
 }
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -47,7 +58,7 @@ function pendingText(run: RunDetail): string | undefined {
   return parts.length ? `Still pending when the run ended: ${parts.join(", ").replace(/, ([^,]*)$/, " and $1")}.` : undefined;
 }
 
-function RunView({ run }: { run: RunDetail }) {
+function RunView({ run, live }: { run: RunDetail; live: boolean }) {
   const { scenarios, runs } = useCatalog();
   const summary = runs.find((r) => r.id === run.id);
   const scenario = scenarioOfRun(scenarios, run.scenario_id);
@@ -60,6 +71,13 @@ function RunView({ run }: { run: RunDetail }) {
   const end = times.at(-1) ?? 0;
   const horizon = typeof obj(run.scenario).horizon === "number" ? (obj(run.scenario).horizon as number) : undefined;
   const [t, setT] = useState(end);
+  const [follow, setFollow] = useState(live);
+  const [wasLive, setWasLive] = useState(live);
+  if (live !== wasLive) {
+    setWasLive(live);
+    if (live) setFollow(true);
+  }
+  if (follow && t !== end) setT(end);
   const [playing, setPlaying] = useState(false);
   const [glide, setGlide] = useState(false);
   const [sel, setSel] = useState<Chip | null>(null);
@@ -67,19 +85,27 @@ function RunView({ run }: { run: RunDetail }) {
   const peek = usePeek();
   const services = useMemo(() => servicesOf(run.scenario), [run]);
   const people = useMemo(() => actorsOf(run.scenario).filter((a) => a.role === "person"), [run]);
-  const { snapshots, error: snapshotError } = useSnapshots(run.id);
+  const { snapshots, error: snapshotError } = useSnapshots(run.id, run.timeline.length);
   const { entries, error: entryError } = useEntries(run.id, sel?.lines ?? null);
   const [peekW, setPeekW] = useState(460);
   const [box, avail] = useWidth<HTMLDivElement>();
 
   useEffect(() => {
-    if (peek === null && !peekOpenedOnce && services[0]) {
+    if (peek === null && !peekOpenedOnce && services[0] && !window.matchMedia(PEEK_OVERLAYS).matches) {
       peekOpenedOnce = true;
       openPeek(services[0].id);
     }
   }, [peek, services]);
 
-  const scale = useMemo(() => fitScale(times, end, avail), [times, end, avail]);
+  const { scale, zoom } = useZoom(times, end, avail);
+  const [query, setQuery] = useState("");
+  const findBox = useRef<HTMLInputElement>(null);
+  const ordered = useMemo(() => [...chips].sort((a, b) => a.t - b.t || a.sequence - b.sequence), [chips]);
+  const matches = useMemo(() => {
+    const words = query.trim().toLowerCase();
+    if (!words) return undefined;
+    return new Set(ordered.filter((c) => `${c.label} ${c.mark ?? ""} ${c.row} ${c.kind.replace(/_/g, " ")}`.toLowerCase().includes(words)).map((c) => c.id));
+  }, [ordered, query]);
   const byLine = useMemo(() => {
     const map = new Map<number, Chip>();
     for (const chip of chips) for (const line of chip.lines) map.set(line, chip);
@@ -123,22 +149,12 @@ function RunView({ run }: { run: RunDetail }) {
     return () => cancelAnimationFrame(raf);
   }, [playing, scale, end, times, box]);
 
-  useEffect(() => {
-    const key = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).closest("input, select, textarea, [role=combobox]")) return;
-      if (e.key === "ArrowRight" || e.key === "ArrowLeft") setGlide(true);
-      if (e.key === "ArrowRight") setT((c) => times.find((x) => x > c) ?? c);
-      if (e.key === "ArrowLeft") setT((c) => [...times].reverse().find((x) => x < c) ?? 0);
-      if (e.key === " ") {
-        e.preventDefault();
-        setPlaying((p) => !p);
-      }
-    };
-    window.addEventListener("keydown", key);
-    return () => window.removeEventListener("keydown", key);
-  }, [times]);
-
+  const showServiceOf = (chip: Chip) => {
+    const coversTheTimeline = window.matchMedia(PEEK_OVERLAYS).matches;
+    if (chip.service && services.some((s) => s.id === chip.service) && (peek !== null || !coversTheTimeline)) openPeek(chip.service);
+  };
   const seekTo = (to: number) => {
+    setFollow(false);
     setPlaying(false);
     setGlide(true);
     setT(to);
@@ -148,11 +164,45 @@ function RunView({ run }: { run: RunDetail }) {
     setSel(chip);
     setFlash(chip.id);
     setTimeout(() => setFlash(null), 1200);
-    if (chip.service && services.some((s) => s.id === chip.service)) openPeek(chip.service);
+    showServiceOf(chip);
   };
+  const stepItem = (direction: 1 | -1) => {
+    const list = matches ? ordered.filter((c) => matches.has(c.id)) : ordered;
+    const at = sel ? list.findIndex((c) => c.id === sel.id) : -1;
+    const next = at >= 0 ? list[at + direction] : direction > 0 ? (list.find((c) => c.t > t) ?? list[0]) : (list.findLast((c) => c.t <= t) ?? list.at(-1));
+    if (next) seek(next);
+  };
+  const keys = useRef({ stepItem });
+  useEffect(() => {
+    keys.current = { stepItem };
+  });
+
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (!isPlainKey(e)) return;
+      if (e.key === "ArrowRight" || e.key === "ArrowLeft" || e.key === " ") setFollow(false);
+      if (e.key === "ArrowRight" || e.key === "ArrowLeft") setGlide(true);
+      if (e.key === "ArrowRight") setT((c) => times.find((x) => x > c) ?? c);
+      if (e.key === "ArrowLeft") setT((c) => [...times].reverse().find((x) => x < c) ?? 0);
+      if (e.key === ".") keys.current.stepItem(1);
+      if (e.key === ",") keys.current.stepItem(-1);
+      if (e.key === "Escape") setSel(null);
+      if (e.key === "/") {
+        e.preventDefault();
+        findBox.current?.focus();
+      }
+      if (e.key === " ") {
+        e.preventDefault();
+        setPlaying((p) => !p);
+      }
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [times]);
 
   const selectedTask = task ? run.tasks.find((x) => x.task_id === task) : undefined;
-  const status = selectedTask ? runStatus(selectedTask.verdict, selectedTask.status !== null) : runStatus(run.verdict, run.verdict !== null);
+  const statusOf = (verdict: string | null, complete: boolean) => (live && !verdict ? "running" : runStatus(verdict, complete));
+  const status = selectedTask ? statusOf(selectedTask.verdict, selectedTask.status !== null) : statusOf(run.verdict, run.verdict !== null);
   const checks = selectedTask ? selectedTask.checks : run.checks;
   const request = run.timeline.find((item) => item.kind === "operator_message" && (!task || item.task_id === task))?.label;
   const model = modelName(run.provenance?.model, run.provenance?.adapter_kind ?? run.agent_kind);
@@ -168,7 +218,7 @@ function RunView({ run }: { run: RunDetail }) {
       <div className="viewer" ref={box}>
         <div className="pagehead">
           <h1 className="truncate">{summary ? runTitle(summary) : run.id}</h1>
-          <StatusBadge status={runStatus(run.verdict, run.verdict !== null)} />
+          <StatusBadge status={statusOf(run.verdict, run.verdict !== null)} />
           {model && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -244,6 +294,7 @@ function RunView({ run }: { run: RunDetail }) {
               className="rounded-full"
               aria-label={playing ? "Pause" : "Play"}
               onClick={() => {
+                setFollow(false);
                 setGlide(false);
                 if (t >= end) setT(times[0] ?? 0);
                 setPlaying(t >= end ? true : !playing);
@@ -261,10 +312,48 @@ function RunView({ run }: { run: RunDetail }) {
             <span className="mono">{clock(t)}</span>
             {horizon !== undefined && <span className="muted">of {horizon}</span>}
           </span>
-          <span className="muted">
-            {chips.filter((c) => c.t <= t).length} of {chips.length} items
-          </span>
+          {live && (
+            <Hint label="Keep the playhead at the newest time">
+              <label className="toggle-follow">
+                <Switch
+                  size="sm"
+                  checked={follow}
+                  onCheckedChange={(on) => {
+                    setPlaying(false);
+                    setFollow(on);
+                  }}
+                  aria-label="Follow the run"
+                />
+                Follow
+              </label>
+            </Hint>
+          )}
+          <span className="muted">{matches ? `${matches.size} of ${chips.length} match` : `${chips.filter((c) => c.t <= t).length} of ${chips.length} items`}</span>
           <span className="grow" />
+          <InputGroup className="tl-find h-7 w-48 shrink-0">
+            <InputGroupAddon>
+              <Icon name="search" />
+            </InputGroupAddon>
+            <InputGroupInput
+              ref={findBox}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") stepItem(e.shiftKey ? -1 : 1);
+                if (e.key === "Escape") {
+                  setQuery("");
+                  e.currentTarget.blur();
+                }
+              }}
+              placeholder="Find in the timeline"
+              aria-label="Find in the timeline"
+            />
+            <Hint label="Focus the search; step through items" keys={["/", ",", "."]}>
+              <InputGroupAddon align="inline-end">
+                <Kbd className="border border-border bg-transparent">/</Kbd>
+              </InputGroupAddon>
+            </Hint>
+          </InputGroup>
           {run.tasks.length > 0 && (
             <Picker
               label="Task"
@@ -286,6 +375,7 @@ function RunView({ run }: { run: RunDetail }) {
           scale={scale}
           playhead={t}
           onSeek={(x) => {
+            setFollow(false);
             setPlaying(false);
             setGlide(false);
             setT(x);
@@ -294,9 +384,11 @@ function RunView({ run }: { run: RunDetail }) {
           selection={sel?.id}
           onSelect={(chip) => {
             setSel(chip);
-            if (chip?.service && services.some((s) => s.id === chip.service)) openPeek(chip.service);
+            if (chip) showServiceOf(chip);
           }}
           flash={flash}
+          matches={matches}
+          zoom={zoom}
         />
 
         {sel && (

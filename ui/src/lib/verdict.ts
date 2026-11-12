@@ -17,6 +17,7 @@ export function failureLabel(failure: RunFailure): string {
 
 export function verdictLine(status: RunStatus, checks: CheckView[], runState: string | null): string {
   const failed = LAYERS.map((l) => ({ l, n: checks.filter((c) => c.layer === l.id && c.passed === false).length })).filter((x) => x.n);
+  if (status === "running") return "Still running; the checks are graded when the run ends.";
   if (status === "incomplete") return "No verdict recorded.";
   if (status === "unknown") return runState && runState !== "done" ? `Not graded: the run ended ${runState.replace(/_/g, " ")}.` : "Not graded.";
   if (status === "fail" && !failed.length) return "Failed.";
@@ -27,6 +28,6 @@ export function verdictLine(status: RunStatus, checks: CheckView[], runState: st
 }
 
 
-export const STATUS_WORD: Record<RunStatus, string> = { ungraded: "Ungraded", pass: "Pass", fail: "Fail", unknown: "Unknown", incomplete: "Incomplete" };
-export const STATUS_TONE: Record<RunStatus, string> = { ungraded: "text-muted-foreground", pass: "text-pass", fail: "text-fail", unknown: "text-muted-foreground", incomplete: "text-muted-foreground" };
-export const STATUS_ICON: Record<RunStatus, string> = { ungraded: "dash", pass: "check", fail: "x", unknown: "dash", incomplete: "clock" };
+export const STATUS_WORD: Record<RunStatus, string> = { ungraded: "Ungraded", pass: "Pass", fail: "Fail", unknown: "Unknown", incomplete: "Incomplete", running: "Running" };
+export const STATUS_TONE: Record<RunStatus, string> = { ungraded: "text-muted-foreground", pass: "text-pass", fail: "text-fail", unknown: "text-muted-foreground", incomplete: "text-muted-foreground", running: "text-foreground" };
+export const STATUS_ICON: Record<RunStatus, string> = { ungraded: "dash", pass: "check", fail: "x", unknown: "dash", incomplete: "clock", running: "play" };
