@@ -12,9 +12,10 @@ from test_runtime import BASE, ScriptedHarness
 from overnight.adapters.operator_model import ModelTransport
 from overnight.domain.contracts import OperatorModel, ScenarioError
 from overnight.execution.adapters import ScriptedAdapter
+from overnight.execution.evaluation import score
 from overnight.execution.operator import Completion, OperatorUnavailable, RecordedTransport
 from overnight.execution.runtime import run_scenario
-from overnight.execution.scenario import resolve_scenario
+from overnight.execution.scenario import load_json, resolve_scenario
 from overnight.execution.usage import ProcessUsage
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -501,14 +502,51 @@ def test_unmeasured_operator_usage_is_not_reported_as_a_spent_budget():
     assert result.verdict["failure"]["retryable"] is True
 
 
-def test_the_shared_world_replay_fixture_is_what_its_script_authors(monkeypatch):
+def authoring():
     sys.path.insert(0, str(ROOT / "scripts"))
-    from author_operator_answers import ANSWERS, authored_lines
+    import author_operator_answers
+
+    return author_operator_answers
+
+
+@pytest.mark.parametrize("case", ["shared-world-chaos", "offsite-week"])
+def test_a_replay_fixture_is_what_its_script_authors_for_a_passing_oracle(monkeypatch, case):
+    authored = authoring().CASES[case]
 
     monkeypatch.chdir(ROOT)
-    assert ANSWERS.read_text(encoding="utf-8") == "".join(authored_lines()), (
-        "regenerate with: uv run scripts/author_operator_answers.py"
+    assert authored.answers.read_text(encoding="utf-8") == "".join(
+        authoring().authored_lines(authored)
+    ), "regenerate with: uv run scripts/author_operator_answers.py"
+
+
+def test_the_offsite_oracle_booking_at_the_lapse_fails_the_checkpoint_for_partial_credit():
+    hold_lapses = 37 * 3600
+    live = load_json(ROOT / "examples/offsite-week.json")
+    oracle = load_json(ROOT / "examples/offsite-week-oracle.json")
+    assert {**oracle, "id": live["id"], "agent": live["agent"]} == live
+
+    actions = oracle["agent"]["actions"]
+    asks_to_buy = next(
+        i for i, action in enumerate(actions) if action["kind"] == "request_approval"
     )
+    last_wait = max(i for i in range(asks_to_buy) if actions[i]["kind"] == "wait")
+    actions[last_wait]["until"] = hold_lapses
+    false_claim = max(i for i, action in enumerate(actions) if action["kind"] == "report")
+    del actions[false_claim]
+    answers = authoring().AuthoredAnswers(authoring().CASES["offsite-week"].answer)
+    result = run_scenario(resolve_scenario(oracle), operator_transport=answers)
+
+    outcomes = dict(
+        zip(
+            [check["label"] for check in oracle["checks"]["outcomes"]],
+            result.verdict["outcomes"],
+            strict=True,
+        )
+    )
+    assert result.verdict["verdict"] == "failed"
+    assert outcomes["Friday booked before the hold lapsed"] is False
+    assert outcomes["Venue asked within the first hour"] is True
+    assert 0 < score(result.verdict) < 1
 
 
 def test_a_scripted_decision_matches_a_request_by_its_value():
