@@ -40,6 +40,16 @@ overnight run examples/shared-world-chaos.json \
 
 See [shared-world episodes](docs/shared-world-episodes.md).
 
+`examples/offsite-week.json` is a three-day case: a venue that answers the next day, a booking that opens for eight hours with no message, a day change and a headcount that arrive by mail. `examples/offsite-week-oracle.json` is the same world with a scripted oracle:
+
+```sh
+overnight run examples/offsite-week-oracle.json \
+  --operator-answers examples/offsite-week-operator.jsonl \
+  --out .local/runs/offsite-week-oracle
+overnight qa examples/offsite-week-oracle.json \
+  --operator-answers examples/offsite-week-operator.jsonl
+```
+
 ## Run a suite
 
 A suite runs several agent setups (arms) on several scenarios (cases). It repeats attempts and reports paired confidence intervals.
@@ -72,7 +82,7 @@ The open-harness suite runs Pi, OpenCode and Prime on the same hard cases. Each 
    overnight suite validate .local/suites/open/suite.json
    ```
 
-   Every arm runs GPT-6 Luna through OpenRouter and reads `OPENROUTER_API_KEY`. To use another OpenAI-compatible endpoint, pass `--base-url`, `--api-key-env` (the name of the variable holding its key) and, if the endpoint needs one, `--reasoning-effort` ([model providers](docs/harness-integration.md#model-providers)). The operator persona of the catering and shared-world cases uses the same provider and model; the native fixtures use a scripted operator. `--arm` and `--case` pick a subset.
+   Every arm runs GPT-6 Luna through OpenRouter and reads `OPENROUTER_API_KEY`. To use another OpenAI-compatible endpoint, pass `--base-url`, `--api-key-env` (the name of the variable holding its key) and, if the endpoint needs one, `--reasoning-effort` ([model providers](docs/harness-integration.md#model-providers)). The operator persona of the catering, shared-world and offsite cases uses the same provider and model; the native fixtures use a scripted operator. `--arm` and `--case` pick a subset.
 
 3. Run it. This calls a real model and spends money.
 

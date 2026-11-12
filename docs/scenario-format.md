@@ -99,7 +99,7 @@ For each request the persona is shown its description, every task's brief and op
 
 The persona fails closed. A transport error, a response without token usage (its cost could not be bounded), two invalid answers to one request, a reached bound or a replay that diverges ends the run `invalid` with an infrastructure failure and an `operator_failure` trace entry. No request is ever approved, denied or dropped silently.
 
-`overnight run --operator-answers TRACE` replays recorded answers from a prior `trace.jsonl` (or a JSONL of `operator_answer` payloads) without a model. Each recorded call must match the next prompt byte for byte; a different prompt or an unused record ends the run `invalid`. `examples/shared-world-chaos-operator.jsonl` holds authored answers for the shared-world oracle: `scripts/author_operator_answers.py` writes them by the persona's brief, their evidence says `"source": "authored"`, and a test fails when they no longer match the prompts. Rerun the script after changing the operator prompt, the brief or the oracle plan.
+`overnight run --operator-answers TRACE` replays recorded answers from a prior `trace.jsonl` (or a JSONL of `operator_answer` payloads) without a model. Each recorded call must match the next prompt byte for byte; a different prompt or an unused record ends the run `invalid`. `examples/shared-world-chaos-operator.jsonl` and `examples/offsite-week-operator.jsonl` hold authored answers for the shared-world and offsite oracles: `scripts/author_operator_answers.py` writes them by each persona's brief, their evidence says `"source": "authored"`, and a test fails when they no longer match the prompts. Rerun the script after changing the operator prompt, the brief or the oracle plan.
 
 ### Approvals
 
