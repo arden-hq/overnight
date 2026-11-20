@@ -4,26 +4,22 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from overnight.domain.contracts import CommandAgent, ScriptedAgent
 from overnight.domain.values import JsonObject
 from overnight.domain.vocabulary import RunStatus, Verdict
 from overnight.execution.adapters import ScriptedAdapter
 from overnight.execution.operator import OperatorTransport, QaTransport, RecordedTransport
 from overnight.execution.runtime import RunResult, run_scenario
-from overnight.execution.scenario import load_json
+from overnight.execution.scenario import ResolvedScenario, load_json
 from overnight.execution.suite import Suite, load_suite
 from overnight.execution.variations import VariationConfig, resolve_variant
 
-LOCAL_ORACLE_KINDS = frozenset({"command", "persistent_command"})
 FALSE_CLAIM = "The task is complete."
-SHAM_AGENTS: tuple[tuple[str, JsonObject, bool], ...] = (
-    ("quits", {"kind": "scripted", "actions": [{"kind": "done"}]}, False),
-    ("idles", {"kind": "scripted", "actions": []}, True),
-    ("waits", {"kind": "scripted", "actions": []}, True),
-    (
-        "claims",
-        {"kind": "scripted", "actions": [{"kind": "report", "message": FALSE_CLAIM}]},
-        True,
-    ),
+SHAM_ACTIONS: tuple[tuple[str, list[JsonObject] | None, bool], ...] = (
+    ("quits", [{"kind": "done"}], False),
+    ("idles", [], True),
+    ("waits", None, True),
+    ("claims", [{"kind": "report", "message": FALSE_CLAIM}], True),
 )
 
 
@@ -82,17 +78,30 @@ def _sham_operator(scenario: JsonObject) -> OperatorTransport | None:
     return QaTransport() if _has_persona(scenario) else None
 
 
-def _run(
+def _run_sham(
     scenario: JsonObject,
     overrides: JsonObject | None,
     variation: VariationConfig | None,
-    agent: JsonObject | None = None,
-    operator_transport: OperatorTransport | None = None,
+    actions: list[JsonObject],
 ) -> RunResult:
-    document = scenario if agent is None else {**scenario, "agent": agent}
+    agent: JsonObject = {"kind": "scripted", "actions": [*actions]}
     return run_scenario(
-        resolve_variant(document, overrides, variation), operator_transport=operator_transport
+        resolve_variant({**scenario, "agent": agent}, overrides, variation),
+        operator_transport=_sham_operator(scenario),
     )
+
+
+def _admit_candidate(
+    scenario: JsonObject,
+    overrides: JsonObject | None,
+    variation: VariationConfig | None,
+    allow_command: bool,
+) -> ResolvedScenario | None:
+    resolved = resolve_variant(scenario, overrides, variation)
+    agent = resolved.config.agent
+    if isinstance(agent, ScriptedAgent) or (allow_command and isinstance(agent, CommandAgent)):
+        return resolved
+    return None
 
 
 def _ends(scenario: JsonObject, overrides: JsonObject | None, variation: VariationConfig | None):
@@ -109,10 +118,11 @@ def _run_waiter(
     scenario: JsonObject,
     overrides: JsonObject | None,
     variation: VariationConfig | None,
-    agent: JsonObject,
     end: int,
 ) -> RunResult:
-    resolved = resolve_variant({**scenario, "agent": agent}, overrides, variation)
+    resolved = resolve_variant(
+        {**scenario, "agent": {"kind": "scripted", "actions": []}}, overrides, variation
+    )
     last_turn = end - 1
     operator = _sham_operator(scenario)
     if resolved.config.tasks:
@@ -148,12 +158,11 @@ def _oracle(
     allow_command: bool,
     operator_answers: Path | None,
 ) -> ProbeResult | None:
-    agent = scenario.get("agent")
-    kind = agent.get("kind") if isinstance(agent, dict) else None
-    if kind != "scripted" and not (allow_command and kind in LOCAL_ORACLE_KINDS):
+    resolved = _admit_candidate(scenario, overrides, variation, allow_command)
+    if resolved is None:
         return None
     operator = None
-    if _has_persona(scenario):
+    if resolved.config.operator.persona is not None:
         if operator_answers is None:
             return ProbeResult(
                 probe="oracle",
@@ -163,7 +172,7 @@ def _oracle(
                 note="persona scenario needs recorded operator answers",
             )
         operator = RecordedTransport.load(operator_answers)
-    verdict = str(_run(scenario, overrides, variation, None, operator).verdict["verdict"])
+    verdict = str(run_scenario(resolved, operator_transport=operator).verdict["verdict"])
     if verdict == Verdict.PASSED:
         return ProbeResult(probe="oracle", verdict=verdict, ok=True)
     if variation is not None:
@@ -221,21 +230,34 @@ def check_scenario(
     authored: Sequence[AuthoredProbe] = (),
 ) -> ScenarioQa:
     probes: list[ProbeResult] = []
-    for name, agent, must_be_rejected in SHAM_AGENTS:
-        if name != "waits":
-            result = _run(scenario, overrides, variation, agent, _sham_operator(scenario))
+    for name, actions, must_be_rejected in SHAM_ACTIONS:
+        if actions is not None:
+            result = _run_sham(scenario, overrides, variation, actions)
             probes.append(_sham(name, result, must_be_rejected))
             continue
         for label, end in _ends(scenario, overrides, variation):
-            result = _run_waiter(scenario, overrides, variation, agent, end)
+            result = _run_waiter(scenario, overrides, variation, end)
             probes.append(_sham(label, result, must_be_rejected))
     for probe in authored:
+        resolved = _admit_candidate(
+            {**scenario, "agent": probe.agent}, overrides, variation, allow_command
+        )
+        if resolved is None:
+            probes.append(
+                ProbeResult(
+                    probe=probe.name,
+                    verdict=None,
+                    ok=False,
+                    note="QA runs scripted agents or command agents with --allow-command",
+                )
+            )
+            continue
         operator = (
             RecordedTransport.from_entries(probe.operator_answers)
-            if _has_persona(scenario)
+            if resolved.config.operator.persona is not None
             else None
         )
-        result = _run(scenario, overrides, variation, probe.agent, operator)
+        result = run_scenario(resolved, operator_transport=operator)
         probes.append(_sham(probe.name, result, True, each_task=False))
     oracle = _oracle(scenario, overrides, variation, allow_command, operator_answers)
     if oracle is not None:

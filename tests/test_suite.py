@@ -29,7 +29,7 @@ from overnight.execution.adapters import (
     ScriptedAdapter,
     describe_failure,
 )
-from overnight.execution.qa import check_scenario, qa_exit_code
+from overnight.execution.qa import AuthoredProbe, check_scenario, qa_exit_code
 from overnight.execution.runtime import Trial, run_scenario
 from overnight.execution.scenario import load_json, resolve_scenario
 from overnight.execution.suite import Suite, plan_suite
@@ -1048,6 +1048,24 @@ def test_qa_never_runs_a_command_without_permission(tmp_path):
     assert report.status == "no_oracle"
     assert qa_exit_code([report]) == 2
     assert not marker.exists()
+
+
+def test_authored_probes_use_the_same_admission_as_the_oracle():
+    document = qa_scenario({"outcomes": [SENT]})
+    command = [sys.executable, "-c", 'input(); print(\'{"kind": "done"}\')']
+    local = AuthoredProbe(name="local", agent={"kind": "command", "command": command})
+    harness = AuthoredProbe(
+        name="native", agent={"kind": "harness", "command": command, "run_on_host": True}
+    )
+
+    blocked = check_scenario("case", document, authored=[local])
+    assert blocked.status == "defect"
+    assert blocked.probes[-1].verdict is None
+
+    allowed = check_scenario("case", document, authored=[local, harness], allow_command=True)
+    local_outcome, native_outcome = allowed.probes[-2:]
+    assert local_outcome.ok and local_outcome.rejections >= 1
+    assert not native_outcome.ok and native_outcome.verdict is None
 
 
 USAGE_AGENT = """
