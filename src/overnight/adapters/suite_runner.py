@@ -2,6 +2,7 @@ import fcntl
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from collections import deque
 from collections.abc import Callable, Generator, Mapping, Sequence
@@ -20,7 +21,7 @@ from overnight.domain.contracts import JsonObject
 from overnight.execution.container import sweep as sweep_containers
 from overnight.execution.evaluation import score
 from overnight.execution.scenario import load_json
-from overnight.execution.suite import PlannedCell, Suite, SuitePlan, load_suite
+from overnight.execution.suite import PlannedCell, Suite, SuiteCase, SuitePlan, load_suite
 from overnight.execution.suite_report import (
     ArmSpend,
     AttemptOutcome,
@@ -66,12 +67,19 @@ def _freeze_inputs(cell: PlannedCell, out: Path) -> None:
         write_private_json(folder / "variation.json", cell.variation)
 
 
-def _run_arguments(out: Path, arm_id: str, case_id: str) -> list[str]:
-    folder = _inputs_dir(out, arm_id, case_id)
+def _frozen_options(case: SuiteCase) -> tuple[str, ...]:
+    return tuple(
+        option
+        for option, configured in (("overrides", case.overrides), ("variation", case.variation))
+        if configured is not None
+    )
+
+
+def _run_arguments(out: Path, arm_id: str, case: SuiteCase) -> list[str]:
+    folder = _inputs_dir(out, arm_id, case.id)
     arguments = [str(folder / "scenario.json")]
-    for option in ("overrides", "variation"):
-        if (folder / f"{option}.json").is_file():
-            arguments += [f"--{option}", str(folder / f"{option}.json")]
+    for option in _frozen_options(case):
+        arguments += [f"--{option}", str(folder / f"{option}.json")]
     return arguments
 
 
@@ -274,6 +282,7 @@ def _next_retry(suite: Suite, out: Path, arm_id: str, case_id: str, attempt: int
 def _run_attempts(
     suite: Suite, out: Path, on_attempt: AttemptCallback, concurrency: int, stop: _StopRequest
 ) -> None:
+    cases = {case.id: case for case in suite.cases}
     queue = deque(
         (arm.id, case.id, attempt)
         for attempt in range(1, suite.attempts + 1)
@@ -290,7 +299,7 @@ def _run_attempts(
                 if retry is None:
                     continue
                 run_dir = _attempt_dir(out, *key, retry)
-                process, log = _start_attempt(_run_arguments(out, key[0], key[1]), run_dir)
+                process, log = _start_attempt(_run_arguments(out, key[0], cases[key[1]]), run_dir)
                 running.append(_Running(key, retry, run_dir, ProcessTree(process), log))
             if not running:
                 continue
@@ -326,14 +335,38 @@ def _exclusive(out: Path) -> Generator[None]:
         yield
 
 
-def _finish(suite: Suite, out: Path, on_attempt: AttemptCallback, concurrency: int) -> SuiteReport:
-    with _exclusive(out), _stop_request() as stop:
-        try:
-            _run_attempts(suite, out, on_attempt, concurrency, stop)
-        finally:
-            report = collect_report(suite, out)
-            replace_private_json(out / REPORT_FILE, report.model_dump(mode="json"), indent=2)
+def _finish(
+    suite: Suite, out: Path, on_attempt: AttemptCallback, concurrency: int, stop: _StopRequest
+) -> SuiteReport:
+    try:
+        _run_attempts(suite, out, on_attempt, concurrency, stop)
+    finally:
+        report = collect_report(suite, out)
+        replace_private_json(out / REPORT_FILE, report.model_dump(mode="json"), indent=2)
     return report
+
+
+def _publish_inputs(plan: SuitePlan, source: JsonObject, out: Path) -> None:
+    with tempfile.TemporaryDirectory(prefix=".freeze-", dir=out) as temporary:
+        staging = Path(temporary)
+        for cell in plan.cells:
+            _freeze_inputs(cell, staging)
+        write_private_json(staging / SUITE_FILE, source)
+        (staging / INPUTS_DIR).rename(out / INPUTS_DIR)
+        (staging / SUITE_FILE).rename(out / SUITE_FILE)
+
+
+def _validate_frozen_inputs(suite: Suite, out: Path) -> None:
+    for case in suite.cases:
+        files = ("scenario.json", *(f"{option}.json" for option in _frozen_options(case)))
+        for arm in suite.arms:
+            folder = _inputs_dir(out, arm.id, case.id)
+            for name in files:
+                path = folder / name
+                try:
+                    load_json(path)
+                except (OSError, ValueError) as error:
+                    raise ValueError(f"suite input was not frozen: {path}") from error
 
 
 def run_suite(
@@ -344,13 +377,15 @@ def run_suite(
     concurrency: int = 1,
 ) -> SuiteReport:
     out.mkdir(mode=0o700, parents=True, exist_ok=False)
-    write_private_json(out / SUITE_FILE, source)
-    for cell in plan.cells:
-        _freeze_inputs(cell, out)
-    return _finish(plan.suite, out, on_attempt, concurrency)
+    with _exclusive(out), _stop_request() as stop:
+        _publish_inputs(plan, source, out)
+        return _finish(plan.suite, out, on_attempt, concurrency, stop)
 
 
 def resume_suite(out: Path, on_attempt: AttemptCallback, concurrency: int = 1) -> SuiteReport:
     if not (out / INPUTS_DIR).is_dir():
         raise ValueError(f"not a suite run directory: {out}")
-    return _finish(load_suite(out / SUITE_FILE), out, on_attempt, concurrency)
+    with _exclusive(out), _stop_request() as stop:
+        suite = load_suite(out / SUITE_FILE)
+        _validate_frozen_inputs(suite, out)
+        return _finish(suite, out, on_attempt, concurrency, stop)
