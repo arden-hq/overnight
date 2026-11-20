@@ -40,7 +40,8 @@ for (const state of [
     assert.deepEqual(trial.status(), {
       busy: state === "scheduler" || state === "busy",
       pending: true,
-      next_wake: state === "future-scheduler" ? 20 : null
+      next_wake: state === "future-scheduler" ? 20 : null,
+      delivered: []
     })
   })
 }
@@ -204,7 +205,7 @@ test("accepted native work remains busy until its terminal evidence is consumed"
   trial.operator = { pendingRuns: new Set(["accepted-run"]) }
   trial.bridge = { calls: new Map(), awaitingReceipt: () => false, hasNativeApprovals: () => false }
   trial.native = { nextWake: () => undefined, busy: () => false, hasPendingDeliveries: () => false, hasPendingQuestions: () => false }
-  assert.deepEqual(trial.status(), { busy: true, pending: true, next_wake: null })
+  assert.deepEqual(trial.status(), { busy: true, pending: true, next_wake: null, delivered: [] })
 })
 
 
@@ -217,7 +218,7 @@ test("native operator wait yields to the runner's next event instead of polling 
   trial.bridge = { calls: new Map(), awaitingReceipt: () => false, hasNativeApprovals: () => false }
   trial.native = { nextWake: () => undefined, busy: () => false, hasPendingDeliveries: () => false, hasPendingQuestions: () => true }
   assert.deepEqual(await trial.nextAction(2400), { kind: "wait", until: 2400 })
-  assert.deepEqual(trial.status(), { busy: false, pending: true, next_wake: null })
+  assert.deepEqual(trial.status(), { busy: false, pending: true, next_wake: null, delivered: [] })
 })
 
 

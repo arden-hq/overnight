@@ -208,6 +208,8 @@ async def serve(
 
     async def write(reply, message_id: str | None) -> None:
         value = reply.model_dump(mode="json")
+        if isinstance(reply, ActionReply) and "delivered" not in reply.status.model_fields_set:
+            del value["status"]["delivered"]
         if message_id is not None:
             value["message_id"] = message_id
         async with output_lock:

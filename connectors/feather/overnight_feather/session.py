@@ -28,12 +28,14 @@ from openai import AsyncOpenAI
 
 from overnight.adapters.bridge import ToolBridge, catalog_contract
 from overnight.adapters.protocol import Observe
-from overnight.domain.contracts import JsonObject, action_contract
+from overnight.domain.contracts import JsonObject, Notification, action_contract
+from overnight.domain.vocabulary import NotificationKind
 from overnight.execution.harness import (
     ActionReply,
     Capabilities,
     HarnessStartupError,
     HarnessStatus,
+    notifications_contract,
 )
 from overnight.execution.tool_server import (
     TrustedToolContext,
@@ -74,8 +76,10 @@ class Chat:
     run_id: str = ""
     now: int = 0
     wake: Wake | None = None
+    wake_at_run_start: Wake | None = None
     question: str | None = None
-    delivered_messages: str = ""
+    delivered_notifications: set[str] = field(default_factory=set)
+    turn_delivered: list[str] = field(default_factory=list)
     finished: bool = False
     agent: FeatherAgent | None = None
     instructions: str = INSTRUCTIONS
@@ -199,7 +203,7 @@ class Connector:
                 compaction=compaction,
                 response_recovery=self.native.profile == "prod",
                 end_run_after_tools=lambda assistant, results: (
-                    chat.wake is not None or chat.question is not None
+                    chat.wake is not chat.wake_at_run_start or chat.question is not None
                 ),
             )
             self.record(
@@ -277,45 +281,58 @@ class Connector:
         if not isinstance(now, int):
             raise ValueError("observation time must be an integer")
         chat.now = now
-        incoming = json.dumps(observation["messages"], sort_keys=True)
         assert chat.bridge is not None
         if chat.bridge.pending is not None:
             action = chat.bridge.resolve(observation["receipts"])
             if action is not None:
                 return self.reply(chat, action)
-        if chat.run is None:
-            if (
-                chat.finished
-                and chat.wake is None
-                and chat.question is None
-                and incoming == chat.delivered_messages
-            ):
-                return self.reply(chat, {"kind": "done"})
-            chat.finished = False
-            if chat.question is not None and incoming == chat.delivered_messages:
-                return self.reply(chat, {"kind": "wait"})
-            if (
-                chat.wake is not None
-                and chat.now < chat.wake.time
-                and incoming == chat.delivered_messages
-            ):
-                return self.reply(chat, {"kind": "wait", "until": chat.wake.time})
-            self.start_run(chat, observation, incoming)
+        notes = [
+            note
+            for note in notifications_contract.validate_python(observation.get("notifications", []))
+            if note.id not in chat.delivered_notifications
+        ]
+        while True:
+            if chat.run is None:
+                action = self.idle_action(chat, notes)
+                if action is not None:
+                    return self.reply(chat, action)
+                self.start_run(chat, observation, notes)
+                notes = []
+            action = await self.next_run_effect(chat)
+            if action is not None:
+                return self.reply(chat, action)
+
+    def idle_action(self, chat: Chat, notes: list[Notification]) -> JsonObject | None:
+        has_answer = any(note.kind == NotificationKind.OPERATOR for note in notes)
+        if chat.question is not None and not has_answer:
+            return {"kind": "wait"}
+        if not chat.finished or notes:
+            return None
+        if chat.wake is not None:
+            return {"kind": "wait", "until": chat.wake.time} if chat.now < chat.wake.time else None
+        return {"kind": "done"}
+
+    async def next_run_effect(self, chat: Chat) -> JsonObject | None:
         assert chat.run is not None
+        assert chat.bridge is not None
         action_task = asyncio.create_task(chat.bridge.next_action())
         try:
             done, _ = await asyncio.wait(
                 (action_task, chat.run), return_when=asyncio.FIRST_COMPLETED
             )
-            if chat.run in done:
-                return self.finish_run(chat)
-            return self.reply(chat, action_task.result())
+            if action_task in done:
+                return action_task.result()
+            action_task.cancel()
+            await asyncio.gather(action_task, return_exceptions=True)
+            if not action_task.cancelled():
+                return action_task.result()
+            return self.finish_run(chat)
         finally:
             if not action_task.done():
                 action_task.cancel()
                 await asyncio.gather(action_task, return_exceptions=True)
 
-    def finish_run(self, chat: Chat) -> ActionReply:
+    def finish_run(self, chat: Chat) -> JsonObject | None:
         assert chat.run is not None
         result = chat.run.result()
         assert chat.bridge is not None
@@ -337,15 +354,13 @@ class Connector:
         if result.stop_reason != "completed":
             raise RuntimeError(f"Feather stopped: {result.stop_reason}: {result.stop_message}")
         if chat.question is not None:
-            return self.reply(chat, {"kind": "report", "message": chat.question})
+            return {"kind": "report", "message": chat.question}
         if result.final_answer:
-            return self.reply(chat, {"kind": "report", "message": result.final_answer})
-        return self.reply(
-            chat, {"kind": "wait", "until": chat.wake.time} if chat.wake else {"kind": "done"}
-        )
+            return {"kind": "report", "message": result.final_answer}
+        return None
 
-    def start_run(self, chat: Chat, observation: JsonObject, incoming: str) -> None:
-        wake = chat.wake
+    def start_run(self, chat: Chat, observation: JsonObject, notes: list[Notification]) -> None:
+        wake = chat.wake if chat.wake is not None and chat.wake.time <= chat.now else None
         if chat.question is not None:
             self.record(
                 {
@@ -357,9 +372,16 @@ class Connector:
                 }
             )
             chat.question = None
-        chat.wake = None
-        chat.delivered_messages = incoming
-        content = json.dumps(observation, ensure_ascii=False)
+        if wake is not None:
+            chat.wake = None
+        chat.wake_at_run_start = chat.wake
+        chat.finished = False
+        ids = [note.id for note in notes]
+        chat.delivered_notifications.update(ids)
+        chat.turn_delivered.extend(ids)
+        prompted = {key: value for key, value in observation.items() if key != "messages"}
+        prompted["notifications"] = [note.model_dump(mode="json") for note in notes]
+        content = json.dumps(prompted, ensure_ascii=False)
         if wake is not None:
             content = f"Connector continuation: {wake.message}\nObservation:\n{content}"
             self.record(
@@ -437,12 +459,14 @@ class Connector:
             )
 
     def reply(self, chat: Chat, action: JsonObject) -> ActionReply:
+        delivered, chat.turn_delivered = chat.turn_delivered, []
         return ActionReply(
             kind="action",
             action=action_contract.validate_python(action),
             status=HarnessStatus(
                 pending=chat.run is not None or chat.wake is not None or chat.question is not None,
-                next_wake=chat.wake.time if chat.wake else None,
+                next_wake=chat.wake.time if chat.wake and chat.wake.time > chat.now else None,
+                delivered=delivered,
             ),
         )
 

@@ -7,7 +7,8 @@ export class OperatorMessages {
     this.epochMs = epochMs
     this.evidence = evidence
     this.worldTools = worldTools
-    this.submitted = 0
+    this.prompted = false
+    this.delivered = new Set()
     this.pendingRuns = new Set()
     this.reportedQuestions = new Set()
   }
@@ -48,22 +49,22 @@ export class OperatorMessages {
     return questions
   }
 
-  messageText(entry, time, observation) {
-    const context = { ...observation }
+  messageText(notifications, time, observation) {
+    const context = { ...observation, notifications }
     delete context.messages
-    const preamble = this.submitted === 0
-      ? `This is an isolated task. Use these connected MCP tools for simulated service data: ${this.worldTools.join(", ") || "none"}. Native mail, calendar and other real service tools do not reach this world. Use Arden's native Automations for delayed follow-up and native ask_user for operator questions; these remain available in scheduled workers. World MCP bindings are already configured and inherited by native Automations. Use those existing bindings; do not add redundant world MCP grants when creating an Automation. Check native tool results for errors and verify creation before claiming it succeeded. Current simulated time: ${new Date(this.epochMs + time * 1000).toISOString()}.\n\n`
-      : ""
-    return `${preamble}${entry.message}\n\nCurrent filtered world observation:\n${JSON.stringify(context)}`
+    const preamble = this.prompted
+      ? ""
+      : `This is an isolated task. Use these connected MCP tools for simulated service data: ${this.worldTools.join(", ") || "none"}. Native mail, calendar and other real service tools do not reach this world. Use Arden's native Automations for delayed follow-up and native ask_user for operator questions; these remain available in scheduled workers. World MCP bindings are already configured and inherited by native Automations. Use those existing bindings; do not add redundant world MCP grants when creating an Automation. Check native tool results for errors and verify creation before claiming it succeeded. Current simulated time: ${new Date(this.epochMs + time * 1000).toISOString()}.\n\n`
+    return `${preamble}New notifications in the filtered world observation:\n${JSON.stringify(context)}`
   }
 
-  async answerQuestion(question, entry, time) {
+  async answerQuestion(question, notification, time) {
     const answered = await this.arden.request(
       "POST",
       `/chat/questions/${encodeURIComponent(question.question_id)}/answer`,
       {
         client_id: randomUUID(),
-        answer: { kind: "text", text: entry.message }
+        answer: { kind: "text", text: notification.summary }
       }
     )
     if (answered.continuation?.run_id) this.pendingRuns.add(answered.continuation.run_id)
@@ -73,39 +74,62 @@ export class OperatorMessages {
       asking_session_id: question.session_id,
       destination_session_id: question.destination_session_id,
       continuation: answered.continuation,
-      text: entry.message,
+      notification_id: notification.id,
+      text: notification.summary,
       time
     })
   }
 
-  async submitMessage(entry, time, observation) {
+  async submitPrompt(notifications, observation) {
     const submitted = await this.arden.client.submit({
       sessionId: this.sessionId,
-      message: this.messageText(entry, time, observation),
+      message: this.messageText(notifications, observation.time, observation),
       approvalMode: "allow"
     })
+    this.prompted = true
     this.pendingRuns.add(submitted.runId)
-    this.evidence.write("operator_message", {
+    this.evidence.write("native_notifications", {
       run_id: submitted.runId,
       session_id: this.sessionId,
-      time,
-      message: entry.message
+      time: observation.time,
+      notification_ids: notifications.map(item => item.id)
     })
   }
 
-  async submit(messages, time, observation = {}) {
-    for (; this.submitted < messages.length; this.submitted += 1) {
-      const entry = messages[this.submitted]
-      const questions = this.submitted === 0 ? [] : await this.actionableQuestions()
+  async submit(observation) {
+    const delivered = []
+    let pending = []
+    const admit = notifications => {
+      for (const { id } of notifications) {
+        this.delivered.add(id)
+        delivered.push(id)
+      }
+    }
+    for (const notification of observation.notifications ?? []) {
+      if (this.delivered.has(notification.id)) continue
+      if (notification.kind !== "operator_message") {
+        pending.push(notification)
+        continue
+      }
+      const questions = this.prompted ? await this.actionableQuestions() : []
       if (questions.length > 1)
         throw new Error(
           `Operator message has ${questions.length} actionable Arden questions; explicit routing is required`
         )
       if (questions.length === 1) {
-        await this.answerQuestion(questions[0], entry, time)
+        await this.answerQuestion(questions[0], notification, observation.time)
+        admit([notification])
         continue
       }
-      await this.submitMessage(entry, time, observation)
+      pending.push(notification)
+      await this.submitPrompt(pending, observation)
+      admit(pending)
+      pending = []
     }
+    if (pending.length && (!this.prompted || !(await this.actionableQuestions()).length)) {
+      await this.submitPrompt(pending, observation)
+      admit(pending)
+    }
+    return delivered
   }
 }

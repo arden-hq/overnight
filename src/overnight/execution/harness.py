@@ -300,10 +300,15 @@ def delivered_ids(adapter, observation: JsonObject, action: Action) -> list[str]
         notification.id
         for notification in notifications_contract.validate_python(observation["notifications"])
     ]
-    if not isinstance(adapter, HarnessAdapter) or isinstance(action, DoneAction):
+    if not isinstance(adapter, HarnessAdapter):
+        return offered
+    done = isinstance(action, DoneAction)
+    if done and "delivered" not in adapter.status.model_fields_set:
         return offered
     claimed = adapter.status.delivered
     unknown = sorted(set(claimed) - set(offered))
     if unknown:
         raise AgentBehaviorError(f"harness delivered notifications it was not offered: {unknown}")
+    if done and set(claimed) != set(offered):
+        raise AgentBehaviorError("harness cannot idle with undelivered notifications")
     return claimed
