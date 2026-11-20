@@ -684,6 +684,32 @@ def test_a_wait_returns_on_the_first_notification_on_timeout_or_at_once():
     assert (ready.time, [note["ref"] for note in ready.value["notifications"]]) == (9, ["mail-2"])
 
 
+def test_a_wait_sees_the_whole_timestamp_before_it_can_expire():
+    unrelated = Event(
+        id="vendor-note",
+        at=4,
+        invocation=_call(
+            "vendor-note-call",
+            "send_message",
+            {"to": ["vendor"], "subject": "Internal", "body": "No agent notification"},
+            "vendor",
+            "mail",
+        ),
+    )
+    world = _notifying_world(events=[unrelated, _vendor_mail(4)])
+    world.invoke(_call("remind", "set_reminder", {"message": "Check mail", "at": 4}))
+    world.invoke(_call("wait", "wait_for_notification", {"timeout": 4}))
+
+    world.advance(10)
+
+    result = world.results["wait"]
+    assert (result.time, result.value["timed_out"]) == (4, False)
+    assert [note["kind"] for note in result.value["notifications"]] == [
+        "mail_received",
+        "reminder_due",
+    ]
+
+
 def test_reminders_and_waits_end_at_the_horizon():
     from overnight.domain.models import PendingWait
 
