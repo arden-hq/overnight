@@ -44,6 +44,7 @@ from overnight.adapters.evidence import UsageMeter
 from overnight.adapters.provider import Provider, endpoint
 from overnight.domain.contracts import CompatibleProvider, Contract, JsonObject
 from overnight.domain.transport import TRAINING_CAPTURE_PATH_VARIABLE
+from overnight.execution.usage import text_request_cost_bound
 
 type Api = Literal["chat", "responses"]
 
@@ -284,9 +285,6 @@ def _replayed_stream(completion: JsonObject, include_usage: bool) -> Iterator[st
     yield "data: [DONE]\n\n"
 
 
-FRAMING_TOKENS_PER_REQUEST = 4096
-
-
 class RequestBudget(Contract):
     """Per-run request limits and the rates that bound their cost."""
 
@@ -302,13 +300,11 @@ class RequestBudget(Contract):
 
     @model_validator(mode="after")
     def bound_native_requests(self):
-        bound = (
-            self.max_requests
-            * (
-                (self.max_request_bytes + FRAMING_TOKENS_PER_REQUEST) * self.input_usd_per_million
-                + self.max_tokens * self.output_usd_per_million
-            )
-            / 1_000_000
+        bound = self.max_requests * text_request_cost_bound(
+            request_bytes=self.max_request_bytes,
+            max_output_tokens=self.max_tokens,
+            input_rate=self.input_usd_per_million,
+            output_rate=self.output_usd_per_million,
         )
         if bound > self.max_cost_usd:
             raise ValueError("native request limits exceed the cost bound")
