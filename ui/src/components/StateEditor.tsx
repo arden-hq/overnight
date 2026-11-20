@@ -1,4 +1,5 @@
 import { obj, str, type Json } from "../lib/run";
+import type { DraftPath } from "../lib/drafts";
 import { AddButton, JsonField, RemoveButton, ValueInput } from "./fields";
 
 const isRecordList = (value: unknown): value is unknown[] => Array.isArray(value) && value.every((item) => typeof item === "object" && item !== null && !Array.isArray(item));
@@ -24,7 +25,7 @@ function newRow(rows: Json[]): Json {
   return row;
 }
 
-function RecordGrid({ rows, onChange, name }: { rows: Json[]; onChange: (rows: Json[]) => void; name: string }) {
+function RecordGrid({ rows, onChange, name, path }: { rows: Json[]; onChange: (rows: Json[]) => void; name: string; path: DraftPath }) {
   const columns = [...new Set(rows.flatMap((r) => Object.keys(r)))];
   const setCell = (i: number, key: string, value: unknown) => onChange(rows.map((r, j) => (j === i ? { ...r, [key]: value } : r)));
   return (
@@ -52,7 +53,7 @@ function RecordGrid({ rows, onChange, name }: { rows: Json[]; onChange: (rows: J
               {rows.map((row, i) => (
                 <tr key={i}>
                   {columns.map((c) => (
-                    <td key={c}>{c in row ? <ValueInput label={`${name} ${i + 1} ${c}`} value={row[c]} onChange={(v) => setCell(i, c, v)} /> : <button type="button" className="cell-missing" onClick={() => setCell(i, c, "")}>Add</button>}</td>
+                    <td key={c}>{c in row ? <ValueInput path={[...path, i, c]} label={`${name} ${i + 1} ${c}`} value={row[c]} onChange={(v) => setCell(i, c, v)} /> : <button type="button" className="cell-missing" onClick={() => setCell(i, c, "")}>Add</button>}</td>
                   ))}
                   <td className="item-remove">
                     <RemoveButton label={`Remove ${str(row.id) ?? `row ${i + 1}`}`} onClick={() => onChange(rows.filter((_, j) => j !== i))} />
@@ -68,8 +69,8 @@ function RecordGrid({ rows, onChange, name }: { rows: Json[]; onChange: (rows: J
   );
 }
 
-export function StateEditor({ value, onChange, name = "state", depth = 0 }: { value: unknown; onChange: (v: unknown) => void; name?: string; depth?: number }) {
-  if (isRecordList(value)) return <RecordGrid rows={value.map(obj)} onChange={onChange} name={name} />;
+export function StateEditor({ value, onChange, path, name = "state", depth = 0 }: { value: unknown; onChange: (v: unknown) => void; path: DraftPath; name?: string; depth?: number }) {
+  if (isRecordList(value)) return <RecordGrid rows={value.map(obj)} onChange={onChange} name={name} path={path} />;
   if (value && typeof value === "object" && !Array.isArray(value) && depth < 3) {
     const entries = Object.entries(value as Json);
     const scalars = entries.filter(([, v]) => v === null || typeof v !== "object");
@@ -82,7 +83,7 @@ export function StateEditor({ value, onChange, name = "state", depth = 0 }: { va
             {scalars.map(([key, v]) => (
               <label key={key} className="form-field">
                 <span className="form-label mono">{key}</span>
-                <ValueInput label={key} value={v} onChange={(nv) => set(key, nv)} />
+                <ValueInput path={[...path, key]} label={key} value={v} onChange={(nv) => set(key, nv)} />
               </label>
             ))}
           </div>
@@ -90,11 +91,11 @@ export function StateEditor({ value, onChange, name = "state", depth = 0 }: { va
         {nested.map(([key, v]) => (
           <section key={key} className="state-section">
             <h4 className="sub mono">{key}</h4>
-            <StateEditor value={v} onChange={(nv) => set(key, nv)} name={key} depth={depth + 1} />
+            <StateEditor path={[...path, key]} value={v} onChange={(nv) => set(key, nv)} name={key} depth={depth + 1} />
           </section>
         ))}
       </div>
     );
   }
-  return <JsonField label={name} value={value} onChange={onChange} rows={Array.isArray(value) ? 4 : 1} />;
+  return <JsonField path={path} label={name} value={value} onChange={onChange} rows={Array.isArray(value) ? 4 : 1} />;
 }

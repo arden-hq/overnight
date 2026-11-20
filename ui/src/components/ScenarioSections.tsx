@@ -135,10 +135,10 @@ export function EventsSection({ doc, edit, detail }: Props) {
                 <TextInput label="Task" mono optional value={call.task_id} onChange={(v) => editEvent(i, (x) => put(child(x, "invocation"), "task_id", v))} />
               </Field>
               <Field label="Arguments" wide>
-                <JsonField label="Arguments" rows={4} value={call.args ?? {}} onChange={(v) => editEvent(i, (x) => put(child(x, "invocation"), "args", v))} />
+                <JsonField path={["events", i, "invocation", "args"]} label="Arguments" rows={4} value={call.args ?? {}} onChange={(v) => editEvent(i, (x) => put(child(x, "invocation"), "args", v))} />
               </Field>
               <Field label="Condition" wide>
-                <JsonField label="Condition" rows={3} optional value={e.condition} onChange={(v) => editEvent(i, (x) => put(x, "condition", v))} />
+                <JsonField path={["events", i, "condition"]} label="Condition" rows={3} optional value={e.condition} onChange={(v) => editEvent(i, (x) => put(x, "condition", v))} />
               </Field>
             </FormGrid>
           );
@@ -243,7 +243,7 @@ export function PeopleSection({ doc, edit }: Props) {
             <ListInput label="Reads" placeholder="No services" value={a.read_services} onChange={(v) => editActor(i, (x) => put(x, "read_services", v.length ? v : undefined))} />
           </Field>
           <Field label="Persona" wide>
-            <KeyValues keyLabel="Persona field" addLabel="Add persona field" value={a.persona} onChange={(v) => editActor(i, (x) => put(x, "persona", v))} />
+            <KeyValues path={["actors", i, "persona"]} keyLabel="Persona field" addLabel="Add persona field" value={a.persona} onChange={(v) => editActor(i, (x) => put(x, "persona", v))} />
           </Field>
           <Field label="May do" wide>
             <Grants services={services} value={a.operations} onChange={(v) => editActor(i, (x) => put(x, "operations", Object.keys(v).length ? v : undefined))} />
@@ -395,7 +395,7 @@ export function OperatorSection({ doc, edit, detail }: Props) {
               {(kind === "approve" || kind === "deny") && (
                 <>
                   <Field label="Match" wide>
-                    <JsonField label="Match" rows={3} value={s.match} onChange={(v) => editStep(i, (x) => put(x, "match", v))} />
+                    <JsonField path={["operator", "steps", i, "match"]} label="Match" rows={3} value={s.match} onChange={(v) => editStep(i, (x) => put(x, "match", v))} />
                   </Field>
                 </>
               )}
@@ -460,7 +460,7 @@ export function OperatorSection({ doc, edit, detail }: Props) {
       <div className="item-list-head">
         <h2 className="pane-title">Agent: {agentWord(str(agent.kind))}</h2>
       </div>
-      <JsonField label="Agent" rows={Math.min(24, JSON.stringify(agent, null, 2).split("\n").length)} value={agent} onChange={(v) => edit((d) => void (d.agent = v))} />
+      <JsonField path={["agent"]} label="Agent" rows={Math.min(24, JSON.stringify(agent, null, 2).split("\n").length)} value={agent} onChange={(v) => edit((d) => void (d.agent = v))} />
     </>
   );
 }
@@ -537,6 +537,8 @@ function checkTarget(check: Json): string {
 const copy = (value: unknown): unknown => JSON.parse(JSON.stringify(value));
 const isPattern = (value: unknown) => typeof value === "object" && value !== null && !Array.isArray(value) && Object.keys(value).length > 0;
 
+const patternProblem = (value: unknown) => isPattern(value) ? undefined : "Enter a nonempty JSON object";
+
 function setCheckOp(check: Json, op: string | undefined, fieldsOfOtherTests: Json) {
   const from = check.op;
   if (from === "before") {
@@ -596,6 +598,9 @@ export function ChecksSection({ doc, edit }: Props) {
       {LAYER_KEYS.map(({ key, name }) => {
         const items = arr(checks[key]).map(obj);
         const editCheck = (i: number, fn: (c: Json) => void) => edit((d) => fn(list(target(d), key)[i]));
+        const checkField = (i: number, field: string) => taskIndex >= 0
+          ? ["tasks", taskIndex, "checks", key, i, field]
+          : ["checks", key, i, field];
         const forbidden = key === "forbidden";
         return (
           <ItemList
@@ -631,7 +636,7 @@ export function ChecksSection({ doc, edit }: Props) {
                 </Field>
                 {forbidden ? (
                   <Field label="Match" wide>
-                    <JsonField label="Match" rows={3} value={c.match} onChange={(v) => editCheck(i, (x) => put(x, "match", v))} />
+                    <JsonField path={checkField(i, "match")} label="Match" rows={3} value={c.match} onChange={(v) => editCheck(i, (x) => put(x, "match", v))} />
                   </Field>
                 ) : (
                   <>
@@ -652,10 +657,10 @@ export function ChecksSection({ doc, edit }: Props) {
                     {c.op === "before" ? (
                       <>
                         <Field label="First" wide>
-                          <JsonField label="First" rows={3} value={c.first} onChange={(v) => isPattern(v) && editCheck(i, (x) => put(x, "first", v))} />
+                          <JsonField path={checkField(i, "first")} label="First" rows={3} value={c.first} validate={patternProblem} onChange={(v) => editCheck(i, (x) => put(x, "first", v))} />
                         </Field>
                         <Field label="Then" wide>
-                          <JsonField label="Then" rows={3} value={c.then} onChange={(v) => isPattern(v) && editCheck(i, (x) => put(x, "then", v))} />
+                          <JsonField path={checkField(i, "then")} label="Then" rows={3} value={c.then} validate={patternProblem} onChange={(v) => editCheck(i, (x) => put(x, "then", v))} />
                         </Field>
                       </>
                     ) : (
@@ -665,7 +670,7 @@ export function ChecksSection({ doc, edit }: Props) {
                     )}
                     {VALUE_OPS.includes(str(c.op) ?? "") && (
                       <Field label={c.op === "match" ? "Contains" : "Equals"} wide>
-                        <JsonField label={c.op === "match" ? "Contains" : "Equals"} rows={c.op === "match" ? 3 : 1} value={c.value} onChange={(v) => editCheck(i, (x) => put(x, "value", v === undefined ? null : v))} />
+                        <JsonField path={checkField(i, "value")} label={c.op === "match" ? "Contains" : "Equals"} rows={c.op === "match" ? 3 : 1} value={c.value} onChange={(v) => editCheck(i, (x) => put(x, "value", v === undefined ? null : v))} />
                       </Field>
                     )}
                   </>

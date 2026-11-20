@@ -1,9 +1,10 @@
-import { useState, type ReactNode } from "react";
+import { useContext, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { parsePath, pathText } from "../lib/edit";
+import { DraftInputsContext, type DraftPath } from "../lib/drafts";
 import { obj, type Json } from "../lib/run";
 import { Icon } from "./Icon";
 import { Picker } from "./Picker";
@@ -74,34 +75,53 @@ export function ListInput({ value, onChange, placeholder, label }: { value: unkn
   );
 }
 
-export function JsonField({ value, onChange, rows = 1, optional, label, className, inputClassName }: { value: unknown; onChange: (v: unknown) => void; rows?: number; optional?: boolean; label?: string; className?: string; inputClassName?: string }) {
-  const shown = value === undefined ? "" : JSON.stringify(value, null, rows > 1 ? 2 : undefined);
-  const [text, setText] = useState(shown);
-  const [seen, setSeen] = useState(shown);
-  const [bad, setBad] = useState<string | null>(null);
-  if (shown !== seen) {
-    setSeen(shown);
-    setText(shown);
-    setBad(null);
-  }
+interface JsonFieldProps {
+  value: unknown;
+  onChange: (v: unknown) => void;
+  path: DraftPath;
+  validate?: (v: unknown) => string | undefined;
+  rows?: number;
+  optional?: boolean;
+  label?: string;
+  className?: string;
+  inputClassName?: string;
+}
+
+export function JsonField({ value, onChange, path, validate, rows = 1, optional, label, className, inputClassName }: JsonFieldProps) {
+  const inputs = useContext(DraftInputsContext);
+  const revision = inputs?.revision ?? 0;
+  const format = (value: unknown) => JSON.stringify(value, null, rows > 1 ? 2 : undefined) ?? "";
+  const shown = format(value);
+  const initial = { text: shown, canonical: shown, revision };
+  const [buffer, setBuffer] = useState(initial);
+  const current = buffer.canonical === shown && buffer.revision === revision ? buffer : initial;
+  if (current !== buffer) setBuffer(current);
+  if (!inputs) throw new Error("JsonField requires a scenario draft");
+  const { setInvalid } = inputs;
+  const invalid = inputs.invalid.get(JSON.stringify(path));
+
   const commit = (next: string) => {
-    setText(next);
-    if (optional && next.trim() === "") {
-      setBad(null);
-      setSeen("");
-      onChange(undefined);
+    let parsed: unknown;
+    try {
+      parsed = optional && next.trim() === "" ? undefined : JSON.parse(next, (_key, value: unknown) => {
+        if (typeof value === "number" && !Number.isFinite(value)) throw new Error("Numbers must be finite");
+        return value;
+      });
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : "Check the syntax";
+      setInvalid(path, { text: next, problem: `Invalid JSON: ${detail}` });
       return;
     }
-    try {
-      const parsed: unknown = JSON.parse(next);
-      setBad(null);
-      setSeen(JSON.stringify(parsed, null, rows > 1 ? 2 : undefined));
-      onChange(parsed);
-    } catch (cause) {
-      setBad(cause instanceof Error ? cause.message.replace(/^JSON\.parse: /, "") : "Not valid JSON");
+    const problem = validate?.(parsed);
+    if (problem) {
+      setInvalid(path, { text: next, problem });
+      return;
     }
+    setInvalid(path, null);
+    setBuffer({ text: next, canonical: format(parsed), revision });
+    onChange(parsed);
   };
-  const common = { "aria-label": label, "aria-invalid": bad ? true : undefined, value: text, spellCheck: false, placeholder: optional ? "None" : undefined };
+  const common = { "aria-label": label, "aria-invalid": !!invalid || undefined, value: invalid?.text ?? current.text, spellCheck: false, placeholder: optional ? "None" : undefined };
   return (
     <span className={cn("json-field", className)}>
       {rows > 1 ? (
@@ -109,16 +129,16 @@ export function JsonField({ value, onChange, rows = 1, optional, label, classNam
       ) : (
         <Input {...common} className={cn("h-7 font-mono text-[12px]", inputClassName)} onChange={(e) => commit(e.target.value)} />
       )}
-      {bad && <span className="field-problem truncate">Not valid JSON: {bad}</span>}
+      {invalid && <span className="field-problem truncate">{invalid.problem}</span>}
     </span>
   );
 }
 
 const CELL_INPUT = "border-transparent bg-transparent shadow-none hover:border-border focus-visible:border-ring focus-visible:bg-card dark:bg-transparent dark:focus-visible:bg-card";
 
-export function ValueInput({ value, onChange, label }: { value: unknown; onChange: (v: unknown) => void; label?: string }) {
+export function ValueInput({ value, onChange, path, label }: { value: unknown; onChange: (v: unknown) => void; path: DraftPath; label?: string }) {
   if (typeof value === "string") return <TextInput label={label} value={value} onChange={(v) => onChange(v ?? "")} className={CELL_INPUT} />;
-  return <JsonField label={label} value={value} onChange={onChange} inputClassName={CELL_INPUT} />;
+  return <JsonField path={path} label={label} value={value} onChange={onChange} inputClassName={CELL_INPUT} />;
 }
 
 export function Choice({ value, options, onChange, none, label }: { value: unknown; options: (string | { value: string; label: string })[]; onChange: (v: string | undefined) => void; none?: string; label: string }) {
@@ -152,7 +172,7 @@ export function PathInput({ value, onChange, label }: { value: unknown; onChange
   );
 }
 
-export function KeyValues({ value, onChange, keyLabel, addLabel }: { value: unknown; onChange: (v: Json) => void; keyLabel: string; addLabel: string }) {
+export function KeyValues({ value, onChange, path, keyLabel, addLabel }: { value: unknown; onChange: (v: Json) => void; path: DraftPath; keyLabel: string; addLabel: string }) {
   const entries = Object.entries(obj(value));
   const rebuild = (next: [string, unknown][]) => onChange(Object.fromEntries(next));
   return (
@@ -160,7 +180,7 @@ export function KeyValues({ value, onChange, keyLabel, addLabel }: { value: unkn
       {entries.map(([key, v], i) => (
         <div className="kv-edit-row" key={i}>
           <TextInput label={keyLabel} mono value={key} onChange={(k) => rebuild(entries.map((e, j) => (j === i ? [k ?? "", e[1]] : e)))} />
-          <ValueInput label={key} value={v} onChange={(nv) => rebuild(entries.map((e, j) => (j === i ? [e[0], nv] : e)))} />
+          <ValueInput path={[...path, key]} label={key} value={v} onChange={(nv) => rebuild(entries.map((e, j) => (j === i ? [e[0], nv] : e)))} />
           <RemoveButton label={`Remove ${key}`} onClick={() => rebuild(entries.filter((_, j) => j !== i))} />
         </div>
       ))}
