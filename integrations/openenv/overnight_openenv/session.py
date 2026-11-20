@@ -301,13 +301,13 @@ class OvernightSession(ResourceSession):
         unanswered = self._proxy.unanswered_calls.unanswered(self._capture.session_id)
         if unanswered:
             raise OvernightError(f"the episode ended with {unanswered} policy call(s) unanswered")
-        lines = stdout.decode().strip().splitlines()
-        if process.returncode != 0 or not lines:
+        response = stdout.strip().rsplit(b"\n", 1)[-1]
+        if process.returncode != 0 or not response:
             detail = stderr.decode().strip()[-2000:] or "<no output>"
             raise OvernightError(
                 f"Overnight's rollout worker exited {process.returncode}: {detail}"
             )
-        return json.loads(lines[-1])
+        return json.loads(response)
 
 
 def _interrupt_then_kill_group(process: subprocess.Popen[bytes], drain_pipes: bool = False) -> None:

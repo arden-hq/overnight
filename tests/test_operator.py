@@ -335,9 +335,17 @@ def without_evidence(trace):
     return kept
 
 
-def test_recorded_answers_replay_a_run_exactly_without_a_model():
-    recorded = run_two_chats(two_chats(), FakeModel(by_brief))
-    replay = run_two_chats(two_chats(), RecordedTransport.from_entries(recorded.trace))
+def test_recorded_answers_replay_a_run_exactly_without_a_model(tmp_path):
+    def answer(text, expects):
+        decision = json.loads(by_brief(text, expects))
+        if decision["message"]:
+            decision["message"] += "\u2028Please check there."
+        return json.dumps(decision, ensure_ascii=False)
+
+    recorded = run_two_chats(two_chats(), FakeModel(answer))
+    path = tmp_path / "answers.jsonl"
+    path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in recorded.trace))
+    replay = run_two_chats(two_chats(), RecordedTransport.load(path))
 
     assert replay.verdict["verdict"] == recorded.verdict["verdict"]
     assert without_evidence(replay.trace) == without_evidence(recorded.trace)

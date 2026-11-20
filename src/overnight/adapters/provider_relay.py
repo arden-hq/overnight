@@ -182,8 +182,11 @@ def run_capture() -> Path | None:
 
 
 def read_capture(path: Path) -> Capture:
-    lines = path.read_text().splitlines() if path.exists() else []
-    entries = [captured_line.validate_json(line) for line in lines if line]
+    try:
+        with path.open(encoding="utf-8", newline="\n") as lines:
+            entries = [captured_line.validate_json(line) for line in lines if line.strip()]
+    except FileNotFoundError:
+        entries = []
     return Capture(
         calls=[entry for entry in entries if isinstance(entry, CapturedCall)],
         unanswered=[entry for entry in entries if isinstance(entry, UnansweredCall)],

@@ -117,8 +117,8 @@ def trace_lines(data: bytes) -> list[str]:
 
     A run appends to its trace while it runs, so a reader can see the last line half written:
     a last line with no newline that is not yet whole JSON is left out."""
-    ended, newline, last = data.rpartition(b"\n")
-    lines = (ended + newline).decode("utf-8").splitlines()
+    *complete, last = data.split(b"\n")
+    lines = [line.decode("utf-8") for line in complete]
     if last.strip():
         try:
             json.loads(last)

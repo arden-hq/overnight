@@ -189,13 +189,13 @@ class OvernightHarness(vf.Harness[OvernightHarnessConfig]):
             trace.info[UNANSWERED_WHEN_CANCELLED] = unanswered_before_stop
             await asyncio.shield(_interrupt_then_kill_group(process))
             raise
-        lines = stdout.decode().strip().splitlines()
-        if process.returncode != 0 or not lines:
+        response = stdout.strip().rsplit(b"\n", 1)[-1]
+        if process.returncode != 0 or not response:
             detail = stderr.decode().strip()[-2000:] or "<no output>"
             raise OvernightError(
                 f"Overnight's rollout worker exited {process.returncode}: {detail}"
             )
-        return json.loads(lines[-1])
+        return json.loads(response)
 
 
 async def _interrupt_then_kill_group(process: asyncio.subprocess.Process) -> None:
