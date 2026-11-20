@@ -13,7 +13,7 @@
 | `verdict.json` | Verdict, check results, pending work and any `failure`. Written last, so its presence marks complete evidence |
 | `task-outcomes.json` | Per-task outcomes for an episode |
 | `provenance.json` | Code, seed, adapter identity and the operator for this run |
-| `agent/` | The agent process's sidecars (`connector-N-generation-G`) and its own folder of the same name. For a [contained](harness-integration.md#isolation) agent, that folder holds everything it wrote in its agent folder, including native files and `egress.log`; files it left that could not be copied are listed in `copy-errors.txt` |
+| `agent/` | The agent process's sidecars (`connector-N-generation-G`) and its own folder of the same name. For a [contained](harness-integration.md#isolation) agent, the folder holds its copied files. The host writes `connector-N-generation-G.egress.log` and `connector-N-generation-G.copy-errors.txt` beside that folder when applicable |
 
 The trace and resolved scenario are privileged: they may contain private simulation data and evaluation criteria. The operator's requests and answers are in the trace: `operator_request` (what was asked), `operator_answer` (the answer, and as evidence the exact prompts, their digests, the raw model text, settings and usage), `operator_failure` (a request the operator could not answer, with the calls it made) and `operator_message` with the `request_id` it answers. The persona's brief appears only in that evidence. Harness connectors write their native evidence (for example `arden-native.jsonl` or `native/`) beside these files; it is not merged into the world trace.
 

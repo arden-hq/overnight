@@ -2,10 +2,13 @@ import copy
 import json
 import sys
 
+import anyio
 import pytest
 from test_runtime import BASE
 
 from overnight import cli
+from overnight.domain.contracts import AgentContainer
+from overnight.execution import adapters
 from overnight.execution.adapters import (
     AdapterError,
     CommandAdapter,
@@ -14,6 +17,41 @@ from overnight.execution.adapters import (
 )
 from overnight.execution.runtime import run_scenario
 from overnight.execution.scenario import resolve_scenario
+
+
+def test_container_proxy_log_is_kept_outside_the_agent_tree(tmp_path, monkeypatch):
+    async def exercise():
+        adapter = PersistentCommandAdapter(
+            ["unused"],
+            provenance_path=tmp_path / "connector.json",
+            container=AgentContainer(image="unused", allow_hosts=["example.com"]),
+        )
+
+        async def discard(*args):
+            pass
+
+        async def start_egress(*args):
+            return "network"
+
+        async def keep_proxy_log(name, path):
+            path.write_text("host proxy output")
+
+        monkeypatch.setattr(adapters, "image_id", discard)
+        monkeypatch.setattr(adapters, "sweep_containers", discard)
+        monkeypatch.setattr(adapters, "start_egress", start_egress)
+        monkeypatch.setattr(adapters, "stop_egress", keep_proxy_log)
+        monkeypatch.setattr(adapters, "remove_container", discard)
+        await adapter._container_command()
+        mounted = adapter._mounted
+        assert mounted is not None
+        (mounted / "notes.txt").write_text("agent output")
+        await adapter._remove_container()
+        kept = tmp_path / "connector-generation-0"
+        assert (kept / "notes.txt").read_text() == "agent output"
+        assert not (kept / "egress.log").exists()
+        assert kept.with_suffix(".egress.log").read_text() == "host proxy output"
+
+    anyio.run(exercise)
 
 
 def test_persistent_protocol_keeps_process_state_and_closes(tmp_path):
