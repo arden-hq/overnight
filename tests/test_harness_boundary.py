@@ -191,6 +191,22 @@ def test_an_idle_harness_is_woken_only_by_a_notification_for_it(tmp_path):
     assert (result.status, _observed_times(result)) == ("done", [0, 4])
 
 
+def test_harness_cannot_report_a_startup_failure_after_acting(tmp_path):
+    from overnight.execution.adapters import AgentBehaviorError
+
+    capabilities = {"simulated_clock": True, "chat_isolation": True, "cancel": True}
+    transition = (
+        "{'kind':'startup_failed','message':'fixture'} if request['observation']['time'] "
+        "else {'kind':'action','action':{'kind':'wait'},'status':{'pending':True}}"
+    )
+    with HarnessAdapter(
+        _child(tmp_path, capabilities, transition), 2, None, HarnessRequirements()
+    ) as adapter:
+        assert adapter.respond({"time": 0})["kind"] == "wait"
+        with pytest.raises(AgentBehaviorError, match="after an action"):
+            adapter.respond({"time": 1})
+
+
 def test_idle_periods_do_not_spend_the_step_budget(tmp_path):
     import copy
 

@@ -2,7 +2,7 @@
 import { createInterface } from "node:readline"
 import { NativeEvidence, trialConfig } from "./arden-process.mjs"
 import { writeArdenProvenance } from "./provenance.mjs"
-import { ArdenTrial } from "./trial.mjs"
+import { ArdenStartupError, ArdenTrial } from "./trial.mjs"
 
 const config = trialConfig()
 writeArdenProvenance(process.env.OVERNIGHT_PROVENANCE_PATH, config)
@@ -56,8 +56,13 @@ try {
           throw new Error("Harness chat identity is required")
         chatId ??= request.chat_id
         if (request.chat_id !== chatId) throw new Error("Arden adapter owns one isolated chat")
-        const action = await trial.observe(request.observation)
-        reply = { kind: "action", action, status: trial.status() }
+        try {
+          const action = await trial.observe(request.observation)
+          reply = { kind: "action", action, status: trial.status() }
+        } catch (error) {
+          if (!(error instanceof ArdenStartupError)) throw error
+          reply = { kind: "startup_failed", message: error.message }
+        }
         break
       }
       case "cancel":

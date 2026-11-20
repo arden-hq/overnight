@@ -29,7 +29,12 @@ from openai import AsyncOpenAI
 from overnight.adapters.bridge import ToolBridge, catalog_contract
 from overnight.adapters.protocol import Observe
 from overnight.domain.contracts import JsonObject, action_contract
-from overnight.execution.harness import ActionReply, Capabilities, HarnessStatus
+from overnight.execution.harness import (
+    ActionReply,
+    Capabilities,
+    HarnessStartupError,
+    HarnessStatus,
+)
 from overnight.execution.tool_server import (
     TrustedToolContext,
     WorldToolServer,
@@ -262,7 +267,12 @@ class Connector:
         observation = message.observation
         chat = self.chats.get(message.chat_id)
         if chat is None:
-            chat = await self.create(message.chat_id, observation)
+            try:
+                chat = await self.create(message.chat_id, observation)
+            except Exception as error:
+                raise HarnessStartupError(
+                    f"native Feather session startup failed: {error}"
+                ) from error
         now = observation["time"]
         if not isinstance(now, int):
             raise ValueError("observation time must be an integer")
