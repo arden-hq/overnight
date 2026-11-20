@@ -12,7 +12,7 @@ Values are stored in one spelling, for seeds and writes alike, so a check compar
 
 | Kind | Seed `state` | Operations and arguments |
 | --- | --- | --- |
-| `mail` | `messages: [{id, from, to: [actor ID or address], cc?, subject, body, date, draft?}]` | `list_messages` (`folder?`: inbox/sent/drafts, `query?`); `read_message` (`id`); `send_message` (`to`, `subject`, `body`, `cc?`); `save_draft` (`subject`, `body`, `to?`, `cc?`); `delete_messages` (`ids`) |
+| `mail` | `messages: [{id, from, to: [actor IDs], cc?, subject, body, date, draft?}]` | `list_messages` (`folder?`: inbox/sent/drafts, `query?`); `read_message` (`id`); `send_message` (`to`, `subject`, `body`, `cc?`); `save_draft` (`subject`, `body`, `to?`, `cc?`); `delete_messages` (`ids`) |
 | `chat` | `conversations: [{id, participants: [actor IDs], messages: [{id, from, body, date}]}]` | `list_conversations`; `read_messages` (`conversation_id`); `start_conversation` (`participants`, `body`); `send_message` (`conversation_id`, `body`) |
 | `calendar` | `events: [{id, owner_id, title, start, end, attendees?, location?}]` | `list_events` (`from?`, `to?`); `create_event` (`title`, `start`, `end`, `attendees?`, `location?`); `update_event` (`id`, optional event fields); `delete_event` (`id`) |
 | `shop` | `catalog: [{id, title, price_cents, available?}], orders?: [{id, item_id, buyer_id, quantity, total_cents, status, placed_at}]` | `list_items`; `buy` (`item_id`, `quantity?`); `list_orders`; `cancel_order` (`order_id`) |
@@ -22,7 +22,7 @@ Values are stored in one spelling, for seeds and writes alike, so a check compar
 
 Read operations return only rows the actor may see. Broad access to a service never lets an actor read another person's private row by ID.
 
-- Mail: inbox visibility follows exact `to`/`cc` actor IDs; sent mail and drafts follow `from`. Deleting inbox mail hides it only for that recipient. Addresses are simulation labels, not delivery targets.
+- Mail: inbox visibility follows exact `to`/`cc` actor IDs; sent mail and drafts follow `from`. Deleting inbox mail hides it only for that recipient. An address-shaped recipient is valid when it is a declared actor ID.
 - Chat: conversation membership is required.
 - Calendar: attendees can read; only the owner can change an event.
 - Shop: the catalog is shared; orders belong to their buyer. Seed orders must name an item in that catalog; `available` is the stock after seeded orders. Cancelling an active order restores its quantity once.
