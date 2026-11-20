@@ -332,14 +332,21 @@ def _command_scenario(scenarios: Path, scenario_id: str, command: list[str]) -> 
 def test_only_scripted_runs_start_without_allow_live(tmp_path: Path):
     scenarios, runs = tmp_path / "scenarios", tmp_path / "runs"
     scenarios.mkdir()
-    for name in ("catering-chaos", "catering-harness"):
+    for name in ("catering-chaos", "catering-harness", "offsite-week-oracle"):
         shutil.copy(EXAMPLES / f"{name}.json", scenarios / f"{name}.json")
     _command_scenario(scenarios, "mail-command", ["python3", "-c", "pass"])
     client = Client(create_app(WorkbenchConfig(runs_roots=[runs], scenarios_roots=[scenarios])))
-    for key, kind in (("catering-harness", "harness"), ("mail-command", "command")):
+    catalog = {item["id"]: item for item in client.get("/api/scenarios").json()["scenarios"]}
+    assert catalog["catering-chaos"]["run_blocker"] is None
+    for key, kind in (
+        ("catering-harness", "harness"),
+        ("mail-command", "command"),
+        ("offsite-week-oracle", "scripted"),
+    ):
         refused = client.post("/api/runs", {"scenario": key})
         assert refused.status_code == 403 and refused.json()["code"] == "live_refused", key
         assert refused.json()["details"]["agent_kind"] == kind
+        assert refused.json()["message"] == catalog[key]["run_blocker"]
     assert not runs.exists() and client.get("/api/status").json()["operation"] is None
 
     started = client.post("/api/runs", {"scenario": "catering-chaos"})

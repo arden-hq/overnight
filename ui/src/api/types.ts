@@ -234,6 +234,7 @@ export interface ScenarioSummary {
   last_run: RunRef | null;
   path: string;
   people: number;
+  run_blocker: string | null;
   scenario_id: string | null;
   service_kinds: string[];
   task_count: number;

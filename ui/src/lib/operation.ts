@@ -73,12 +73,10 @@ export async function stopRun() {
 
 export const dismissOperation = () => setState({ dismissed: state.operation?.id ?? null, error: null });
 
-export function runBlocker(scenario: ScenarioSummary | undefined, status: StatusResponse | undefined, running: boolean, dirty = false): string | undefined {
+export function runBlocker(scenario: ScenarioSummary | undefined, running: boolean, dirty = false): string | undefined {
   if (!scenario) return "Unknown scenario";
   if (running) return "Another run is in progress";
-  if (scenario.agent_kind !== "scripted" && !status?.allow_live)
-    return `Only scripted runs start here; ${(scenario.agent_kind ?? "this").replace(/_/g, " ")} agents need overnight serve --allow-live`;
-  if (!scenario.valid) return "The scenario file is invalid";
+  if (scenario.run_blocker) return scenario.run_blocker;
   if (dirty) return "Save or discard the edits first";
   return undefined;
 }

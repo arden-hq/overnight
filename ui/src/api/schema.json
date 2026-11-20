@@ -1155,6 +1155,17 @@
           "title": "People",
           "type": "integer"
         },
+        "run_blocker": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Run Blocker"
+        },
         "scenario_id": {
           "anyOf": [
             {
@@ -1189,6 +1200,7 @@
         "valid",
         "error",
         "agent_kind",
+        "run_blocker",
         "task_count",
         "service_kinds",
         "people",
