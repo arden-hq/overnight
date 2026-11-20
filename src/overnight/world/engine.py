@@ -166,13 +166,18 @@ class World:
         return self._queue.pending_ids
 
     def next_wake_time(self) -> int | None:
-        dispatch = self._queue.next(now=self.now, state_for=self._state_for, results=self._results)
+        dispatch = self._next_event()
         times = (
             dispatch.time if dispatch is not None else None,
             self._system.next_due(),
             self._notifications.next_until(),
         )
         return min((time for time in times if time is not None), default=None)
+
+    def _next_event(self, until: int | None = None) -> Dispatch | None:
+        return self._queue.next(
+            now=self.now, state_for=self._state_for, results=self._results, until=until
+        )
 
     def _state_for(self, service_id: str) -> JsonObject:
         return self._sessions[service_id].snapshot()
@@ -415,11 +420,9 @@ class World:
             )
             if invocation.chat_id is not None:
                 self._threads[(invocation.actor_id, service_id, notice.ref)] = invocation.chat_id
-        result = self._record_result(
+        return self._record_result(
             invocation, ResultStatus.SUCCEEDED, transition.result, None, event_id
         )
-        self._settle()
-        return result
 
     def _begin_wait(self, invocation: Invocation, until: int) -> Result | PendingWait:
         inbox = self._notifications.resolve(invocation.actor_id, invocation.chat_id)
@@ -453,7 +456,10 @@ class World:
                 return self._record_result(
                     invocation, ResultStatus.FAILED, {}, _failure_message(error), _event_id
                 )
-            return self._commit_transition(invocation, transition, _event_id)
+            result = self._commit_transition(invocation, transition, _event_id)
+            if _event_id is None and result.status == ResultStatus.SUCCEEDED:
+                self._settle()
+            return result
         except Exception as error:
             self.record(
                 "invalid",
@@ -469,16 +475,16 @@ class World:
             raise ValueError("time must advance monotonically by integer seconds")
         produced: list[Result] = []
         while True:
-            event = self._queue.next(
-                now=self.now, state_for=self._state_for, results=self._results, until=to
-            )
+            event = self._next_event(to)
             time = self._next_time_with_work(event, to)
             if time is None:
                 break
-            if event is not None and event.time == time:
+            self.now = time
+            while event is not None and event.time == time:
                 produced.append(self._dispatch(event))
-                continue
-            self._fire_reminders_then_settle_waits(time)
+                event = self._next_event(time)
+            self._fire_reminders()
+            self._settle()
         self.now = to
         return tuple(produced)
 
@@ -494,15 +500,9 @@ class World:
         ]
         return max(self.now, min(times)) if times else None
 
-    def _fire_reminders_then_settle_waits(self, time: int) -> None:
-        self.now = time
-        self._fire_reminders()
-        self._settle()
-
     def _dispatch(self, dispatch: Dispatch) -> Result:
         event = dispatch.scheduled.event
         failed = dispatch.failed_dependency
-        self.now = dispatch.time
         self._queue.finish(dispatch)
         self.record(
             "event",
