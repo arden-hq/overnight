@@ -245,7 +245,7 @@ def run(
 @click.option("--overrides", type=click.Path(path_type=Path))
 @click.option("--variation", type=click.Path(path_type=Path))
 @click.option(
-    "--allow-command", is_flag=True, help="Run a command agent as the oracle; it may call a model."
+    "--allow-command", is_flag=True, help="Allow command agents in QA; they may call a model."
 )
 @OPERATOR_ANSWERS
 @click.option(
@@ -398,7 +398,7 @@ def suite_validate(path: Path) -> int:
 @suite.command("qa")
 @click.argument("path", type=click.Path(path_type=Path))
 @click.option(
-    "--allow-command", is_flag=True, help="Run command agents as oracles; they may call a model."
+    "--allow-command", is_flag=True, help="Allow command agents in QA; they may call a model."
 )
 def suite_qa(path: Path, allow_command: bool) -> int:
     """Check every case of a suite."""
