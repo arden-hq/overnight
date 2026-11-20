@@ -16,7 +16,7 @@ from overnight.execution.evaluation import score
 from overnight.execution.operator import Completion, OperatorUnavailable, RecordedTransport
 from overnight.execution.runtime import run_scenario
 from overnight.execution.scenario import load_json, resolve_scenario
-from overnight.execution.usage import ProcessUsage
+from overnight.execution.usage import NO_CALLS, ProcessUsage
 
 ROOT = Path(__file__).resolve().parents[1]
 CALL_USAGE = ProcessUsage(calls=1, input_tokens=100, output_tokens=10, cost_usd=0.001)
@@ -500,6 +500,52 @@ def test_unmeasured_operator_usage_is_not_reported_as_a_spent_budget():
     assert result.verdict["failure"]["type"] == "OperatorUnavailable"
     assert "unmeasured" in result.verdict["failure"]["message"]
     assert result.verdict["failure"]["retryable"] is True
+
+
+def test_one_completion_can_exhaust_the_operator_budget_before_its_answer_is_used():
+    doc = single_lane()
+    doc["operator"]["persona"]["model"] = {"max_cost_usd": 0.0001}
+    doc["agent"]["actions"] = [
+        {"kind": "report", "message": "Checking in."},
+        {
+            "kind": "invoke",
+            "id": "send",
+            "service_id": "mail",
+            "operation": "send_message",
+            "args": {"to": ["operator"], "subject": "Booked", "body": "Done"},
+        },
+        {"kind": "done"},
+    ]
+    model = FakeModel(lambda _, __: '{"message": "Go ahead."}')
+
+    result = run_scenario(resolve_scenario(doc), operator_transport=model)
+
+    assert result.verdict["verdict"] == "invalid"
+    assert result.verdict["failure"]["type"] == "OperatorBudgetExceeded"
+    assert result.operator_usage == CALL_USAGE
+    assert len(model.prompts) == 1
+    assert not any(entry["kind"] == "operator_answer" for entry in result.trace)
+
+
+def test_operator_request_is_refused_before_transport_when_the_cost_bound_does_not_fit(monkeypatch):
+    doc = single_lane()
+    doc["operator"]["persona"]["model"] = {"max_cost_usd": 0.0001}
+    doc["agent"]["actions"] = [{"kind": "report", "message": "Checking in."}]
+    resolved = resolve_scenario(doc)
+    transport = ModelTransport(
+        resolved.config.operator.persona.model,
+        resolved.config.seed,
+        {"OPENROUTER_API_KEY": "test"},
+    )
+
+    def unexpected_transport(*args, **kwargs):
+        pytest.fail("request must be rejected before transport")
+
+    monkeypatch.setattr(transport, "complete", unexpected_transport)
+    result = run_scenario(resolved, operator_transport=transport)
+
+    assert result.verdict["failure"]["type"] == "OperatorBudgetExceeded"
+    assert result.operator_usage == NO_CALLS
 
 
 def authoring():

@@ -43,6 +43,16 @@ UNMEASURED = ProcessUsage()
 NO_CALLS = ProcessUsage(calls=0, input_tokens=0, output_tokens=0, cost_usd=0.0)
 
 
+def text_request_cost_bound(
+    *, request_bytes: int, max_output_tokens: int, input_rate: float, output_rate: float
+) -> float:
+    """Budget one token per request byte plus a margin for provider message framing."""
+    framing_tokens = 4096
+    return (
+        (request_bytes + framing_tokens) * input_rate + max_output_tokens * output_rate
+    ) / 1_000_000
+
+
 def readable(**values: object) -> dict[str, object]:
     kept: dict[str, object] = {}
     for name, value in values.items():

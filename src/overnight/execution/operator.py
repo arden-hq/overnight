@@ -3,7 +3,7 @@ import json
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -48,7 +48,7 @@ class OperatorUnavailable(OperatorError):
 
 
 class OperatorBudgetExceeded(OperatorError, ContractError):
-    """The run's operator call or cost cap was reached before a needed call."""
+    """The run cannot admit a request or use a completion within its operator budget."""
 
 
 class OperatorReplayDiverged(OperatorError, ContractError):
@@ -112,6 +112,11 @@ class OperatorTransport(Protocol):
     def finish(self) -> None:
         """Called once after a run that did not fail; a replay checks every record was used."""
         ...
+
+
+@runtime_checkable
+class OperatorCostBound(Protocol):
+    def request_cost_bound(self, prompt: Sequence[Message]) -> float: ...
 
 
 class Operator(Protocol):
@@ -367,9 +372,7 @@ class PersonaOperator:
             {"role": "user", "content": user},
         ]
 
-    def _complete(
-        self, prompt: list[Message], expects: Expects, calls: list[OperatorCall]
-    ) -> Completion:
+    def _remaining_budget(self, calls: list[OperatorCall]) -> tuple[int, float]:
         limits = self.persona.model
         cost = self._usage.cost_usd
         calls_made = self._usage.calls
@@ -378,10 +381,26 @@ class PersonaOperator:
                 "operator usage is unmeasured, so max_calls and max_cost_usd cannot be enforced",
                 calls,
             )
-        if calls_made >= limits.max_calls or cost >= limits.max_cost_usd:
+        if calls_made > limits.max_calls or cost > limits.max_cost_usd:
             raise OperatorBudgetExceeded(
-                f"operator budget reached: {self._usage.calls} calls, cost {cost} USD "
+                f"operator budget exceeded: {calls_made} calls, cost {cost} USD "
                 f"(limits {limits.max_calls} calls, {limits.max_cost_usd} USD)",
+                calls,
+            )
+        return limits.max_calls - calls_made, limits.max_cost_usd - cost
+
+    def _complete(
+        self, prompt: list[Message], expects: Expects, calls: list[OperatorCall]
+    ) -> Completion:
+        remaining_calls, remaining_cost = self._remaining_budget(calls)
+        if remaining_calls == 0 or remaining_cost == 0:
+            raise OperatorBudgetExceeded("operator request budget exhausted", calls)
+        if (
+            isinstance(self.transport, OperatorCostBound)
+            and self.transport.request_cost_bound(prompt) > remaining_cost
+        ):
+            raise OperatorBudgetExceeded(
+                f"operator request could exceed the remaining cost budget of {remaining_cost} USD",
                 calls,
             )
         try:
@@ -404,6 +423,7 @@ class PersonaOperator:
                 usage=completion.usage,
             )
         )
+        self._remaining_budget(calls)
         return completion
 
     def answer(self, request: OperatorRequest, view: OperatorView) -> AnsweredRequest:

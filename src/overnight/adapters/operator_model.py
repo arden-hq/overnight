@@ -10,7 +10,7 @@ from overnight.adapters.provider import endpoint
 from overnight.domain.contracts import OperatorModel
 from overnight.domain.values import JsonObject
 from overnight.execution.operator import Completion, Expects, Message, OperatorUnavailable
-from overnight.execution.usage import ProcessUsage, readable
+from overnight.execution.usage import ProcessUsage, readable, text_request_cost_bound
 
 MAX_RESPONSE_BYTES = 1_048_576
 
@@ -56,11 +56,22 @@ class ModelTransport:
         if provider.reasoning_effort is not None:
             self.settings["reasoning_effort"] = provider.reasoning_effort
 
-    def complete(self, prompt: Sequence[Message], expects: Expects) -> Completion:
+    def _request_body(self, prompt: Sequence[Message]) -> bytes:
         body = {key: value for key, value in self.settings.items() if key != "base_url"}
+        return json.dumps({**body, "messages": list(prompt)}).encode()
+
+    def request_cost_bound(self, prompt: Sequence[Message]) -> float:
+        return text_request_cost_bound(
+            request_bytes=len(self._request_body(prompt)),
+            max_output_tokens=self.config.max_output_tokens,
+            input_rate=self.config.input_usd_per_million,
+            output_rate=self.config.output_usd_per_million,
+        )
+
+    def complete(self, prompt: Sequence[Message], expects: Expects) -> Completion:
         request = urllib.request.Request(
             self.url,
-            data=json.dumps({**body, "messages": list(prompt)}).encode(),
+            data=self._request_body(prompt),
             headers={
                 "Authorization": f"Bearer {self._key}",
                 "Content-Type": "application/json",
