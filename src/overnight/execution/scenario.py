@@ -13,6 +13,7 @@ from overnight.domain.contracts import (
     Checks,
     CompoundCondition,
     Condition,
+    CountCheck,
     EqualsCheck,
     InvokeAction,
     JsonObject,
@@ -134,6 +135,8 @@ def _check_ids(check: Check) -> Iterator[str]:
         yield from _named_ids(check.first)
         yield from _named_ids(check.then)
         return
+    if isinstance(check, CountCheck) and check.source == "trace":
+        yield from _named_ids(check.where)
     expected = check.value if isinstance(check, EqualsCheck) else None
     if check.source == "state" and check.path[:1] == ["results"]:
         if len(check.path) > 1:

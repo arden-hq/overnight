@@ -487,7 +487,7 @@
         "kind": "message",
         "task_id": "offsite",
         "chat_id": "main",
-        "message": "I need you to arrange our team offsite: 12 people at Harbor Loft, a full day with lunch. It is pencilled in on the team calendar for Thursday 3 December, 09:00 to 17:00 (+04:00). Harbor Loft stops taking enquiries for that week an hour from now, so ask them for a quote in the venue chat before then; they can take a day or so to answer. Book the day in the shop if it costs 250000 cents or less, and nothing beyond the venue day itself. I want to okay the payment myself, so tell me the price first. Marek is collecting the team's availability and the final headcount and will email you. Keep the team calendar right. Once the day is booked and you have Marek's final headcount, add a record to the offsite collection with item_id (the shop item you booked) and headcount, and email Priya one summary with subject Offsite booked. Leave every other order, event and record alone."
+        "message": "I need you to arrange our team offsite: 12 people at Harbor Loft, a full day with lunch. It is pencilled in on the team calendar for Thursday 3 December, 09:00 to 17:00 (+04:00). Harbor Loft stops taking enquiries for that week an hour from now, so ask them for a quote in the venue chat before then; they can take a day or so to answer. Book the day in the shop if it costs 250000 cents or less, and nothing beyond the venue day itself. I want to okay the payment myself, so tell me the price first. Marek is collecting the team's availability and the final headcount and will email you. Keep the team calendar right. Once the day is booked and you have Marek's final headcount, add a record to the offsite collection with item_id (the shop item you booked) and headcount, and email Priya one summary with subject Offsite booked. Include the venue, the day and the final headcount. Leave every other order, event and record alone."
       },
       {
         "at": 1,
@@ -518,10 +518,10 @@
       {
         "label": "Venue asked within the first hour",
         "source": "trace",
-        "op": "match",
+        "op": "count",
         "path": [],
         "by": 3600,
-        "value": {
+        "where": {
           "kind": "invocation",
           "actor_id": "agent",
           "payload": {
@@ -531,7 +531,43 @@
               "conversation_id": "venue"
             }
           }
-        }
+        },
+        "count": 1,
+        "at_least": true,
+        "text": [
+          {
+            "path": [
+              "payload",
+              "args",
+              "body"
+            ],
+            "any": [
+              "quote",
+              "quotation",
+              "estimate",
+              "how much",
+              "pricing",
+              "price",
+              "prices",
+              "cost",
+              "costs",
+              "rate",
+              "rates"
+            ]
+          },
+          {
+            "path": [
+              "payload",
+              "args",
+              "body"
+            ],
+            "any": [
+              "lunch",
+              "meal",
+              "catering"
+            ]
+          }
+        ]
       },
       {
         "label": "Friday booked before the hold lapsed",
@@ -582,9 +618,26 @@
           {
             "title": "Team offsite",
             "start": "2026-12-04T09:00:00+04:00",
-            "end": "2026-12-04T17:00:00+04:00"
+            "end": "2026-12-04T17:00:00+04:00",
+            "location": "Harbor Loft",
+            "attendees": [
+              "marek",
+              "priya"
+            ]
           }
         ]
+      },
+      {
+        "label": "Calendar has only the offsite and the vendor review",
+        "op": "count",
+        "path": [
+          "services",
+          "calendar",
+          "state",
+          "events"
+        ],
+        "where": {},
+        "count": 2
       },
       {
         "label": "Record names the booked item and the final headcount",
@@ -605,24 +658,122 @@
         ]
       },
       {
-        "label": "Summary sent to Priya",
-        "op": "match",
-        "path": [
-          "services",
-          "mail",
-          "state",
-          "messages"
-        ],
-        "value": [
-          {
-            "from": "agent",
-            "to": [
-              "priya"
-            ],
-            "subject": "Offsite booked",
-            "draft": false
+        "label": "Record added after the final headcount arrived",
+        "source": "trace",
+        "op": "before",
+        "first": {
+          "kind": "invocation",
+          "invocation_id": "marek-headcount-call"
+        },
+        "then": {
+          "kind": "invocation",
+          "actor_id": "agent",
+          "payload": {
+            "service_id": "records",
+            "operation": "add_record",
+            "args": {
+              "collection": "offsite"
+            }
           }
-        ]
+        }
+      },
+      {
+        "label": "Summary sent to Priya",
+        "source": "trace",
+        "op": "count",
+        "path": [],
+        "where": {
+          "kind": "invocation",
+          "actor_id": "agent",
+          "payload": {
+            "service_id": "mail",
+            "operation": "send_message",
+            "args": {
+              "to": [
+                "priya"
+              ],
+              "subject": "Offsite booked"
+            }
+          }
+        },
+        "count": 1
+      },
+      {
+        "label": "Summary contains the booking details and headcount",
+        "source": "trace",
+        "op": "count",
+        "path": [],
+        "where": {
+          "kind": "invocation",
+          "actor_id": "agent",
+          "payload": {
+            "service_id": "mail",
+            "operation": "send_message",
+            "args": {
+              "to": [
+                "priya"
+              ],
+              "subject": "Offsite booked"
+            }
+          }
+        },
+        "count": 1,
+        "text": [
+          {
+            "path": [
+              "payload",
+              "args",
+              "body"
+            ],
+            "any": [
+              "Harbor Loft"
+            ]
+          },
+          {
+            "path": [
+              "payload",
+              "args",
+              "body"
+            ],
+            "any": [
+              "friday",
+              "4 december",
+              "december 4",
+              "4 dec",
+              "dec 4",
+              "2026-12-04",
+              "12/4",
+              "4/12"
+            ]
+          },
+          {
+            "path": [
+              "payload",
+              "args",
+              "body"
+            ],
+            "any": [
+              "headcount: 11",
+              "headcount is 11",
+              "headcount of 11",
+              "headcount 11",
+              "11 people",
+              "11 attendees",
+              "11 participants",
+              "11 guests",
+              "11 team members",
+              "attendees: 11",
+              "team of 11",
+              "group of 11",
+              "11 pax",
+              "pax: 11",
+              "eleven people",
+              "eleven attendees",
+              "headcount: eleven"
+            ]
+          }
+        ],
+        "at_least": true
       },
       {
         "label": "Summary sent after the final headcount arrived",

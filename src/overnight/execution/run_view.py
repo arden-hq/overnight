@@ -6,10 +6,16 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError
 
-from overnight.domain.contracts import Scenario
+from overnight.domain.contracts import CountCheck, Scenario
 from overnight.domain.models import json_equal, json_matches
 from overnight.domain.values import JsonObject, at_path
-from overnight.execution.evaluation import NOT_EFFECTS, holds
+from overnight.execution.evaluation import (
+    NOT_EFFECTS,
+    committed_trace,
+    count_evidence_matches,
+    holds,
+    report_evidence,
+)
 from overnight.services.operations import ServiceBoundary
 
 type Layer = Literal["outcome", "collateral", "claims", "forbidden"]
@@ -238,9 +244,21 @@ def render_predicate(layer: Layer, check: JsonObject) -> str:
     elif op == "before":
         first = ", ".join(_flatten(_obj(check.get("first"))))
         body = f"{first} before " + ", ".join(_flatten(_obj(check.get("then"))))
+    elif op == "count":
+        comparison = "at least" if check.get("at_least") is True else "exactly"
+        filters = _flatten(_obj(check.get("where")))
+        for condition in _list(check.get("text")):
+            entry = _obj(condition)
+            alternatives = ", ".join(json.dumps(value) for value in _list(entry.get("any")))
+            filters.append(f"{render_path(entry.get('path'))} contains any of {alternatives}")
+        body = f"{path} has {comparison} {check.get('count')} matches"
+        if filters:
+            body += " with " + ", ".join(filters)
     else:
         body = json.dumps(check, sort_keys=True, ensure_ascii=False)
     source = _str(check.get("source")) or "state"
+    if (deadline := _int(check.get("by"))) is not None:
+        body += f" by world time {deadline}"
     return body if source == "state" else f"{source.replace('_', ' ')}: {body}"
 
 
@@ -260,7 +278,7 @@ class _TraceIndex:
         for line, row in entries:
             if (sequence := _int(row.get("sequence"))) is not None:
                 by_sequence.setdefault(sequence, line)
-            kind = row.get("kind")
+            kind = _str(row.get("kind"))
             if kind == "state_change" and (
                 service := _str(_obj(row.get("payload")).get("service_id"))
             ):
@@ -277,6 +295,10 @@ class _TraceIndex:
 
 
 def _matches_value(check: JsonObject, evidence: JsonValue) -> bool:
+    if (deadline := _int(check.get("by"))) is not None:
+        time = _int(_obj(evidence).get("time"))
+        if time is None or time > deadline:
+            return False
     try:
         value = at_path(
             evidence, [part for part in _list(check.get("path")) if isinstance(part, str | int)]
@@ -296,12 +318,16 @@ def _state_lines(path: list[JsonValue], index: _TraceIndex) -> list[int]:
     return []
 
 
-def _reports(index: _TraceIndex) -> list[int]:
-    return [line for line, row in index.entries if row.get("kind") == "agent_report"]
+type _EvidenceRows = Sequence[tuple[int, JsonObject]]
 
 
 def _check_lines(
-    layer: Layer, check: JsonObject, passed: JsonValue, index: _TraceIndex
+    layer: Layer,
+    check: JsonObject,
+    passed: JsonValue,
+    index: _TraceIndex,
+    trace: _EvidenceRows,
+    reports: _EvidenceRows,
 ) -> list[int]:
     if layer == "forbidden":
         sequences = [_int(sequence) for sequence in _list(passed)]
@@ -313,29 +339,25 @@ def _check_lines(
             }
         )
     if layer == "claims":
-        return _reports(index) + _check_lines("outcome", _obj(check.get("requires")), passed, index)
+        return [line for line, _ in reports] + _check_lines(
+            "outcome", _obj(check.get("requires")), passed, index, trace, reports
+        )
     source = _str(check.get("source")) or "state"
     if source == "state":
         return _state_lines(_list(check.get("path")), index)
-    if source == "agent_report":
-        return [
-            line
-            for line, row in index.entries
-            if row.get("kind") == "agent_report" and _matches_value(check, _obj(row.get("payload")))
-        ]
+    rows = reports if source == "agent_report" else trace
+    if check.get("op") == "count":
+        try:
+            predicate = CountCheck.model_validate(check)
+        except ValidationError:
+            return []
+        return [line for line, row in rows if count_evidence_matches(predicate, row)]
     if check.get("op") == "before":
         patterns = (check.get("first"), check.get("then"))
         return [
-            line
-            for line, row in index.entries
-            if row.get("kind") not in NOT_EFFECTS
-            and any(json_matches(row, pattern) for pattern in patterns)
+            line for line, row in rows if any(json_matches(row, pattern) for pattern in patterns)
         ]
-    return [
-        line
-        for line, row in index.entries
-        if row.get("kind") not in NOT_EFFECTS and _matches_value(check, row)
-    ]
+    return [line for line, row in rows if _matches_value(check, row)]
 
 
 def _passed(layer: Layer, value: JsonValue) -> bool | None:
@@ -352,6 +374,17 @@ def check_views(
     task_id: str | None = None,
 ) -> list[CheckView]:
     views: list[CheckView] = []
+    trace: _EvidenceRows = []
+    reports: _EvidenceRows = []
+    if index is not None:
+        scoped = [
+            (line, row)
+            for line, row in index.entries
+            if task_id is None or row.get("task_id") == task_id
+        ]
+        lines = {id(row): line for line, row in scoped}
+        trace = [(lines[id(row)], row) for row in committed_trace([row for _, row in scoped])]
+        reports = [(line, report) for line, row in scoped if (report := report_evidence(row))]
     for layer, check_key, verdict_key in LAYERS:
         results = _list(_obj(verdict).get(verdict_key))
         for position, raw in enumerate(_list(_obj(checks).get(check_key))):
@@ -370,7 +403,9 @@ def check_views(
                     source=_str(check.get("source"))
                     or ("trace" if layer == "forbidden" else "state"),
                     passed=_passed(layer, result) if verdict is not None else None,
-                    evidence_lines=_check_lines(layer, check, result, index) if index else [],
+                    evidence_lines=(
+                        _check_lines(layer, check, result, index, trace, reports) if index else []
+                    ),
                 )
             )
     return views
