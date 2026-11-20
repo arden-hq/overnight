@@ -20,7 +20,9 @@ from overnight.adapters.workbench import WorkbenchConfig, create_app, scenario_b
 from overnight.cli import cli
 from overnight.domain.contracts import Checks
 from overnight.domain.values import JsonObject
+from overnight.domain.vocabulary import RunStatus
 from overnight.execution.adapters import ScriptedAdapter
+from overnight.execution.evaluation import evaluate
 from overnight.execution.run_view import RunArtifacts, build_run_detail
 from overnight.execution.runtime import run_scenario
 from overnight.execution.scenario import load_json, resolve_scenario
@@ -114,6 +116,40 @@ def test_check_label_is_strict_display_only():
     assert labelled.forbidden[0].match == {"kind": "invocation"}
 
 
+def test_count_check_links_only_the_evidence_that_contributes_to_its_grade():
+    checks: JsonObject = {
+        "outcomes": [
+            {
+                "op": "count",
+                "source": "trace",
+                "path": [],
+                "by": 8,
+                "where": {"kind": "invocation"},
+                "text": [{"path": ["payload", "message"], "any": ["quote"]}],
+                "count": 1,
+            }
+        ]
+    }
+    rows = [
+        _entry(1, "invocation", time=2, invocation_id="first", payload={"message": "Quote?"}),
+        _entry(2, "result", time=2, invocation_id="first", payload={"status": "succeeded"}),
+        _entry(3, "invocation", time=3, invocation_id="denied", payload={"message": "Quote?"}),
+        _entry(4, "result", time=3, invocation_id="denied", payload={"status": "denied"}),
+        _entry(5, "invocation", time=9, invocation_id="late", payload={"message": "Quote?"}),
+        _entry(6, "result", time=9, invocation_id="late", payload={"status": "succeeded"}),
+    ]
+    verdict = evaluate(checks, {}, rows, RunStatus.DONE)
+    run = build_run_detail(
+        "run",
+        RunArtifacts(
+            scenario={"id": "s", "checks": checks},
+            trace=list(enumerate(rows, 1)),
+            verdict=verdict,
+        ),
+    )
+    assert [(check.passed, check.evidence_lines) for check in run.checks] == [(True, [1])]
+
+
 def test_historical_scenario_projects_leniently():
     old: JsonObject = {
         "id": "old",
@@ -124,7 +160,11 @@ def test_historical_scenario_projects_leniently():
         "old-run",
         RunArtifacts(
             scenario=old,
-            trace=[(1, _entry(0, "legacy_kind", payload="not-an-object")), (3, ["odd"])],
+            trace=[
+                (1, _entry(0, "legacy_kind", payload="not-an-object")),
+                (3, ["odd"]),
+                (4, {"kind": ["malformed"], "invocation_id": "old-call"}),
+            ],
             verdict={"outcomes": ["yes"]},
         ),
     )
@@ -133,6 +173,7 @@ def test_historical_scenario_projects_leniently():
     assert [(item.line, item.lane, item.kind) for item in detail.timeline] == [
         (1, "system", "legacy_kind"),
         (3, "system", "unknown"),
+        (4, "system", "unknown"),
     ]
 
 

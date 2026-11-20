@@ -430,6 +430,21 @@ class PresenceCheck(EvidenceCheck):
         return self
 
 
+class TextSelector(Contract):
+    path: Path
+    any: Annotated[list[TrimmedText], Field(min_length=1)]
+
+
+class CountCheck(EvidenceCheck):
+    """Count candidates that match a JSON object and every listed text selector."""
+
+    op: Literal["count"]
+    where: JsonObject
+    count: Nonnegative
+    at_least: bool = False
+    text: list[TextSelector] = Field(default_factory=list)
+
+
 class OrderCheck(CheckLabel):
     """The first trace entry matching ``then`` comes after an entry matching ``first``."""
 
@@ -439,7 +454,9 @@ class OrderCheck(CheckLabel):
     then: Annotated[JsonObject, Field(min_length=1)]
 
 
-type Check = Annotated[EqualsCheck | PresenceCheck | OrderCheck, Field(discriminator="op")]
+type Check = Annotated[
+    EqualsCheck | PresenceCheck | CountCheck | OrderCheck, Field(discriminator="op")
+]
 
 
 class ForbiddenCheck(CheckLabel):

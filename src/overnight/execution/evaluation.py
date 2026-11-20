@@ -1,9 +1,12 @@
+import re
+
 import regex
 from pydantic import JsonValue
 
 from overnight.domain.contracts import (
     Check,
     Checks,
+    CountCheck,
     EqualsCheck,
     JsonObject,
     OrderCheck,
@@ -58,12 +61,48 @@ def _check(
 ) -> bool:
     if isinstance(check, OrderCheck):
         return _in_order(check, trace)
+    if isinstance(check, CountCheck):
+        return _check_count(check, snapshot, trace, reports)
     if check.source == "state":
         return _check_value(check, snapshot, initial)
     evidence = trace if check.source == "trace" else reports
     return any(
         _check_value(check, entry, initial) for entry in evidence if _in_time(entry, check.by)
     )
+
+
+def count_item_matches(check: CountCheck, candidate: object) -> bool:
+    if not isinstance(candidate, dict) or not json_matches(candidate, check.where):
+        return False
+    for selector in check.text:
+        text = _at(candidate, selector.path)
+        if not isinstance(text, str):
+            return False
+        folded = text.casefold()
+        if not any(
+            re.search(rf"(?<!\w){re.escape(phrase.casefold())}(?!\w)", folded)
+            for phrase in selector.any
+        ):
+            return False
+    return True
+
+
+def count_evidence_matches(check: CountCheck, evidence: JsonObject) -> bool:
+    return _in_time(evidence, check.by) and count_item_matches(check, _at(evidence, check.path))
+
+
+def _check_count(
+    check: CountCheck, snapshot: JsonObject, trace: list[JsonObject], reports: list[JsonObject]
+) -> bool:
+    if check.source == "state":
+        items = _at(snapshot, check.path)
+        if not isinstance(items, list):
+            return False
+        matches = sum(count_item_matches(check, item) for item in items)
+    else:
+        evidence = trace if check.source == "trace" else reports
+        matches = sum(count_evidence_matches(check, item) for item in evidence)
+    return matches >= check.count if check.at_least else matches == check.count
 
 
 def _in_time(entry: JsonObject, by: int | None) -> bool:
@@ -73,36 +112,35 @@ def _in_time(entry: JsonObject, by: int | None) -> bool:
     return type(time) is int and time <= by
 
 
-def _committed(trace: list[JsonObject]) -> list[JsonObject]:
+def committed_trace(trace: list[JsonObject]) -> list[JsonObject]:
     succeeded = {
-        entry.get("invocation_id")
+        invocation
         for entry in trace
         if entry.get("kind") == "result"
+        and isinstance(invocation := entry.get("invocation_id"), str)
         and isinstance(payload := entry.get("payload"), dict)
         and payload.get("status") == ResultStatus.SUCCEEDED
     }
     return [
         entry
         for entry in trace
-        if entry.get("kind") not in NOT_EFFECTS
-        and (entry.get("invocation_id") is None or entry.get("invocation_id") in succeeded)
+        if isinstance(kind := entry.get("kind"), str)
+        and kind not in NOT_EFFECTS
+        and (
+            (invocation := entry.get("invocation_id")) is None
+            or (isinstance(invocation, str) and invocation in succeeded)
+        )
     ]
 
 
-def _agent_reports(trace: list[JsonObject]) -> list[JsonObject]:
-    reports: list[JsonObject] = []
-    for entry in trace:
-        if entry.get("kind") != "agent_report":
-            continue
-        payload = entry.get("payload")
-        if not isinstance(payload, dict):
-            continue
-        time = payload.get("time")
-        message = payload.get("message")
-        if type(time) is not int or not isinstance(message, str):
-            continue
-        reports.append({"time": time, "message": message})
-    return reports
+def report_evidence(entry: JsonObject) -> JsonObject | None:
+    if entry.get("kind") != "agent_report" or not isinstance(payload := entry.get("payload"), dict):
+        return None
+    time = payload.get("time")
+    message = payload.get("message")
+    if type(time) is not int or not isinstance(message, str):
+        return None
+    return {"time": time, "message": message}
 
 
 def _claimed(pattern: str, reports: list[JsonObject]) -> bool | None:
@@ -126,8 +164,8 @@ def evaluate(
 ) -> JsonObject:
     checks = checks if isinstance(checks, Checks) else Checks.model_validate(checks)
     initial = initial or {}
-    reports = _agent_reports(trace)
-    committed = _committed(trace)
+    reports = [report for entry in trace if (report := report_evidence(entry)) is not None]
+    committed = committed_trace(trace)
     outcomes = [_check(check, snapshot, committed, reports, initial) for check in checks.outcomes]
     collateral = [
         _check(check, snapshot, committed, reports, initial) for check in checks.collateral

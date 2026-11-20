@@ -603,6 +603,74 @@ def test_the_offsite_oracle_booking_at_the_lapse_fails_the_checkpoint_for_partia
     assert 0 < score(result.verdict) < 1
 
 
+@pytest.mark.parametrize(
+    ("defect", "expected_rejection"),
+    [
+        ("greeting", "Venue asked within the first hour"),
+        ("stale-calendar", "Calendar has only the offsite and the vendor review"),
+        ("recreated-calendar", None),
+        ("early-record", "Record added after the final headcount arrived"),
+        ("blank-summary", "Summary contains the booking details and headcount"),
+        ("wrong-headcount", "Summary contains the booking details and headcount"),
+        ("duplicate-summary", "Summary sent to Priya"),
+    ],
+)
+def test_the_offsite_oracle_grades_the_work_through_its_effects(defect, expected_rejection):
+    oracle = load_json(ROOT / "examples/offsite-week-oracle.json")
+    actions = oracle["agent"]["actions"]
+    by_id = {action.get("id"): action for action in actions}
+    if defect == "greeting":
+        by_id["ask-venue"]["args"]["body"] = "Hello."
+    elif defect in {"stale-calendar", "recreated-calendar"}:
+        move = by_id["move-offsite"]
+        move["operation"] = "create_event"
+        move["args"].pop("id")
+        move["args"].update(
+            title="Team offsite",
+            location="Harbor Loft",
+            attendees=["marek", "priya"],
+        )
+        if defect == "recreated-calendar":
+            actions.insert(
+                actions.index(move),
+                {
+                    **move,
+                    "id": "delete-old",
+                    "operation": "delete_event",
+                    "args": {"id": "offsite"},
+                },
+            )
+    elif defect == "early-record":
+        record = by_id["log-offsite"]
+        actions.remove(record)
+        wait = next(i for i, action in enumerate(actions) if action.get("until") == 187200)
+        actions.insert(wait, record)
+    elif defect == "blank-summary":
+        by_id["send-summary"]["args"]["body"] = ""
+    elif defect == "wrong-headcount":
+        summary = by_id["send-summary"]["args"]
+        summary["body"] = summary["body"].replace("headcount: 11", "headcount: 111")
+    else:
+        summary = by_id["send-summary"]
+        actions.insert(actions.index(summary) + 1, {**summary, "id": "send-summary-again"})
+    case = authoring().CASES["offsite-week"]
+    result = run_scenario(
+        resolve_scenario(oracle), operator_transport=authoring().AuthoredAnswers(case.answer)
+    )
+
+    if expected_rejection is None:
+        assert result.verdict["verdict"] == "passed"
+        return
+    assert result.verdict["verdict"] == "failed"
+    outcomes = {
+        check["label"]: passed
+        for check, passed in zip(
+            oracle["checks"]["outcomes"], result.verdict["outcomes"], strict=True
+        )
+    }
+    assert outcomes[expected_rejection] is False
+
+
 def test_a_scripted_decision_matches_a_request_by_its_value():
     request = {**MAIL_ARGS, "cc": [], "subject": f" {MAIL_ARGS['subject']}\n"}
     action = {**send("s1"), "args": request}

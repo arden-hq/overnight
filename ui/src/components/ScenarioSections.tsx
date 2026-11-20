@@ -527,8 +527,13 @@ const LAYER_KEYS = [
   { key: "forbidden", name: "Forbidden" },
 ] as const;
 
-const CHECK_OPS = ["eq", "match", "exists", "unchanged", "before"];
+const CHECK_OPS = ["eq", "match", "exists", "unchanged", "before", "count"];
 const VALUE_OPS = ["eq", "match"];
+const CHECK_FIELDS = {
+  before: { first: { kind: "invocation" }, then: { kind: "invocation" } },
+  count: { where: {}, count: 1, text: undefined, at_least: undefined },
+  value: { value: null },
+};
 
 function checkTarget(check: Json): string {
   return check.op === "before" ? `${text(check.first)} then ${text(check.then)}` : pathText(check.path);
@@ -536,43 +541,33 @@ function checkTarget(check: Json): string {
 
 const copy = (value: unknown): unknown => JSON.parse(JSON.stringify(value));
 const isPattern = (value: unknown) => typeof value === "object" && value !== null && !Array.isArray(value) && Object.keys(value).length > 0;
-
 const patternProblem = (value: unknown) => isPattern(value) ? undefined : "Enter a nonempty JSON object";
 
 function setCheckOp(check: Json, op: string | undefined, fieldsOfOtherTests: Json) {
-  const from = check.op;
-  if (from === "before") {
-    for (const key of ["first", "then"]) if (check[key] !== undefined) fieldsOfOtherTests[key] = copy(check[key]);
-  } else {
-    fieldsOfOtherTests.source = check.source ?? "state";
-    for (const key of ["path", "value"]) if (check[key] !== undefined) fieldsOfOtherTests[key] = copy(check[key]);
+  if (check.op !== "before") {
+    if (check.op !== "unchanged") fieldsOfOtherTests.source = check.source ?? "state";
+    for (const key of ["path", "by"]) {
+      if (check[key] !== undefined) fieldsOfOtherTests[key] = copy(check[key]);
+      delete check[key];
+    }
   }
-  const restore = (key: string) => {
-    if (check[key] === undefined && fieldsOfOtherTests[key] !== undefined) check[key] = copy(fieldsOfOtherTests[key]);
-  };
+  for (const fields of Object.values(CHECK_FIELDS)) {
+    for (const key of Object.keys(fields)) {
+      if (check[key] !== undefined) fieldsOfOtherTests[key] = copy(check[key]);
+      delete check[key];
+    }
+  }
+  const source = op === "before" ? "trace" : op === "unchanged" ? "state" : (fieldsOfOtherTests.source ?? "state");
+  put(check, "source", source === "state" ? undefined : source);
   check.op = op;
-  if (op === "before") {
-    check.source = "trace";
-    delete check.path;
-    delete check.value;
-    restore("first");
-    restore("then");
-    check.first ??= { kind: "invocation" };
-    check.then ??= { kind: "invocation" };
-    return;
+  if (op !== "before") {
+    check.path = fieldsOfOtherTests.path ?? (source === "state" ? ["services"] : []);
+    if (source !== "state") put(check, "by", fieldsOfOtherTests.by);
   }
-  if (from === "before") {
-    delete check.first;
-    delete check.then;
-    if (fieldsOfOtherTests.source !== undefined) put(check, "source", fieldsOfOtherTests.source === "state" ? undefined : fieldsOfOtherTests.source);
+  const defaults = op === "before" ? CHECK_FIELDS.before : op === "count" ? CHECK_FIELDS.count : VALUE_OPS.includes(op ?? "") ? CHECK_FIELDS.value : {};
+  for (const [key, value] of Object.entries(defaults)) {
+    put(check, key, fieldsOfOtherTests[key] === undefined ? value : copy(fieldsOfOtherTests[key]));
   }
-  if (op === "unchanged") delete check.source;
-  restore("path");
-  check.path ??= check.source === undefined || check.source === "state" ? ["services"] : [];
-  if (VALUE_OPS.includes(op ?? "")) {
-    restore("value");
-    check.value ??= null;
-  } else delete check.value;
 }
 
 export function ChecksSection({ doc, edit }: Props) {
@@ -626,7 +621,7 @@ export function ChecksSection({ doc, edit }: Props) {
                     { head: "Source", width: 104, cell: (c) => (str(c.source) ?? "state").replace(/_/g, " ") },
                     { head: "Path", mono: true, cell: (c) => checkTarget(c), title: (c) => checkTarget(c) },
                     { head: "Test", width: 84, cell: (c) => str(c.op) },
-                    { head: "Value", width: "18%", mono: true, cell: (c) => (VALUE_OPS.includes(str(c.op) ?? "") ? text(c.value) : ""), title: (c) => text(c.value) },
+                    { head: "Value", width: "18%", mono: true, cell: (c) => c.op === "count" ? `${c.at_least ? "≥ " : ""}${str(c.count) ?? text(c.count)}` : VALUE_OPS.includes(str(c.op) ?? "") ? text(c.value) : "" },
                   ]
             }
             form={(c, i) => (
@@ -641,7 +636,10 @@ export function ChecksSection({ doc, edit }: Props) {
                 ) : (
                   <>
                     <Field label="Source">
-                      <Choice label="Source" value={c.op === "before" ? "trace" : (c.source ?? "state")} options={c.op === "before" ? ["trace"] : c.op === "unchanged" ? ["state"] : ["state", "trace", "agent_report"]} onChange={(v) => editCheck(i, (x) => put(x, "source", v === "state" && x.source === undefined ? undefined : v))} />
+                      <Choice label="Source" value={c.op === "before" ? "trace" : (c.source ?? "state")} options={c.op === "before" ? ["trace"] : c.op === "unchanged" ? ["state"] : ["state", "trace", "agent_report"]} onChange={(v) => editCheck(i, (x) => {
+                        put(x, "source", v === "state" ? undefined : v);
+                        if (v === "state") delete x.by;
+                      })} />
                     </Field>
                     <Field label="Test">
                       <Choice
@@ -672,6 +670,27 @@ export function ChecksSection({ doc, edit }: Props) {
                       <Field label={c.op === "match" ? "Contains" : "Equals"} wide>
                         <JsonField path={checkField(i, "value")} label={c.op === "match" ? "Contains" : "Equals"} rows={c.op === "match" ? 3 : 1} value={c.value} onChange={(v) => editCheck(i, (x) => put(x, "value", v === undefined ? null : v))} />
                       </Field>
+                    )}
+                    {c.op !== "before" && (c.source === "trace" || c.source === "agent_report") && (
+                      <Field label="By world time">
+                        <NumberInput label="By world time" optional value={c.by} onChange={(v) => editCheck(i, (x) => put(x, "by", v))} />
+                      </Field>
+                    )}
+                    {c.op === "count" && (
+                      <>
+                        <Field label="Comparison">
+                          <Choice label="Comparison" value={c.at_least ? "At least" : "Exactly"} options={["Exactly", "At least"]} onChange={(v) => editCheck(i, (x) => put(x, "at_least", v === "At least" || undefined))} />
+                        </Field>
+                        <Field label="Count">
+                          <NumberInput label="Count" value={c.count} onChange={(v) => editCheck(i, (x) => put(x, "count", v))} />
+                        </Field>
+                        <Field label="Match fields" wide>
+                          <JsonField path={checkField(i, "where")} label="Match fields" rows={3} value={c.where ?? {}} validate={(v) => obj(v) === v ? undefined : "Enter a JSON object"} onChange={(v) => editCheck(i, (x) => put(x, "where", v))} />
+                        </Field>
+                        <Field label="Text filters" wide>
+                          <JsonField path={checkField(i, "text")} label="Text filters" rows={3} optional value={c.text} validate={(v) => v === undefined || Array.isArray(v) ? undefined : "Enter a JSON array"} onChange={(v) => editCheck(i, (x) => put(x, "text", v))} />
+                        </Field>
+                      </>
                     )}
                   </>
                 )}
