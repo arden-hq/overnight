@@ -320,6 +320,26 @@ def test_arms_run_from_frozen_inputs_and_the_report_recomputes_from_evidence(tmp
         run_suite(plan, json.loads(path.read_text()), out, lambda *_: None)
 
 
+def test_suite_resume_cannot_admit_attempts_while_inputs_are_freezing(tmp_path, monkeypatch):
+    path = write_suite(tmp_path, {"kind": "scripted"}, attempts=1)
+    out = tmp_path / "out"
+    freeze = suite_runner._freeze_inputs
+
+    def try_resume(cell, staging):
+        freeze(cell, staging)
+        with pytest.raises(ValueError):
+            resume_suite(out, lambda *_: pytest.fail("resume admitted an attempt"))
+
+    monkeypatch.setattr(suite_runner, "_freeze_inputs", try_resume)
+    report = run_suite(plan_suite(path), load_json(path), out, lambda *_: None)
+    assert report.complete
+
+    # Archives from earlier releases can contain partially frozen inputs.
+    (out / ".inputs" / "quit" / "only" / "scenario.json").unlink()
+    with pytest.raises(ValueError):
+        resume_suite(out, lambda *_: pytest.fail("resume admitted an attempt"))
+
+
 def test_invalid_pairing_fails_before_any_attempt(tmp_path):
     path = write_suite(tmp_path, {"kind": "scripted", "actions": [{"kind": "done"}]})
     document = json.loads(path.read_text())
