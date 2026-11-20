@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs } from "@/components/ui/tabs";
 import type { ScenarioDetail } from "../api/types";
 import { scenarioPath, useCatalog, useResource } from "../lib/api";
-import { useDraft, type DraftHandle } from "../lib/drafts";
+import { DraftInputsContext, useDraft, type DraftHandle } from "../lib/drafts";
 import { href, type Section } from "../lib/router";
 import { arr, obj, runStatus, str, type Json } from "../lib/run";
 import { Icon, serviceIcon } from "../components/Icon";
@@ -27,11 +27,11 @@ export function Editor({ id, section }: { id: string; section: Section }) {
 }
 
 function Validity({ draft, detail }: { draft: DraftHandle; detail: ScenarioDetail }) {
-  const invalid = draft.dirty ? draft.problem?.kind === "invalid" : !detail.summary.valid;
+  const invalid = draft.invalidInput || (draft.dirty ? draft.problem?.kind === "invalid" : !detail.summary.valid);
   const valid = draft.dirty ? draft.valid : detail.summary.valid;
   const word = invalid ? "Invalid" : valid ? "Valid" : "Not checked";
   return (
-    <span className={cn("sound", invalid ? "s-blocked" : valid ? "s-sound" : "s-unchecked")} title={detail.summary.error ?? undefined}>
+    <span className={cn("sound", invalid ? "s-blocked" : valid ? "s-sound" : "s-unchecked")} title={draft.invalidInput ? "Correct the highlighted fields" : detail.summary.error ?? undefined}>
       <Icon name={invalid ? "x" : valid ? "check" : "dash"} size={12} />
       {word}
     </span>
@@ -68,15 +68,15 @@ function EditorPage({ id, section, detail }: { id: string; section: Section; det
             <Button variant="ghost" size="sm" onClick={draft.discard} disabled={!!draft.busy}>
               Discard
             </Button>
-            <Button variant="outline" size="sm" className="shadow-sm" onClick={() => void draft.validate()} disabled={!!draft.busy}>
+            <Button variant="outline" size="sm" className="shadow-sm" onClick={() => void draft.validate()} disabled={!!draft.busy || draft.invalidInput}>
               {draft.busy === "validate" ? "Checking…" : "Validate"}
             </Button>
           </>
         )}
-        <Button size="sm" onClick={() => void draft.save()} disabled={!draft.dirty || !!draft.busy}>
+        <Button size="sm" onClick={() => void draft.save()} disabled={!draft.dirty || !!draft.busy || draft.invalidInput}>
           {draft.busy === "save" ? "Saving…" : "Save"}
         </Button>
-        <RunButton scenario={summary} dirty={draft.dirty} />
+        <RunButton scenario={summary} />
       </div>
       {!summary.valid && !draft.dirty && (
         <div className="banner notice">
@@ -84,6 +84,12 @@ function EditorPage({ id, section, detail }: { id: string; section: Section; det
           <span className="truncate" title={summary.error ?? undefined}>
             {summary.error}
           </span>
+        </div>
+      )}
+      {draft.invalidInput && (
+        <div className="banner notice" role="alert">
+          <Icon name="x" />
+          <span>Correct the invalid JSON or discard the draft.</span>
         </div>
       )}
       {problem && (
@@ -101,9 +107,10 @@ function EditorPage({ id, section, detail }: { id: string; section: Section; det
         </div>
       )}
       <div className="editor-body">
+        <DraftInputsContext value={draft.inputs}>
         <div className="scenario-page">
           {raw ? (
-            <JsonField label="Scenario JSON" rows={40} className="raw-json" value={doc} onChange={(v) => draft.replace(obj(v))} />
+            <JsonField path={[]} label="Scenario JSON" rows={40} className="raw-json" value={doc} validate={(v) => obj(v) === v ? undefined : "A scenario must be a JSON object"} onChange={(v) => draft.replace(obj(v))} />
           ) : (
             <>
               {section === "services" && <Services detail={detail} doc={doc} edit={draft.edit} />}
@@ -114,6 +121,7 @@ function EditorPage({ id, section, detail }: { id: string; section: Section; det
             </>
           )}
         </div>
+        </DraftInputsContext>
       </div>
     </div>
   );
@@ -194,8 +202,8 @@ function Services({ detail, doc, edit }: { detail: ScenarioDetail; doc: Json; ed
               </tbody>
             </table>
           )}
-          {tab === "data" && (index >= 0 ? <StateEditor key={svc.id} value={state} onChange={setState} name={svc.id} /> : <p className="empty">This service is not in the draft.</p>)}
-          {tab === "json" && index >= 0 && <JsonField key={svc.id} label={`${svc.id} state`} rows={24} value={state} onChange={setState} />}
+          {tab === "data" && (index >= 0 ? <StateEditor key={svc.id} path={["services", index, "state"]} value={state} onChange={setState} name={svc.id} /> : <p className="empty">This service is not in the draft.</p>)}
+          {tab === "json" && index >= 0 && <JsonField key={svc.id} path={["services", index, "state"]} label={`${svc.id} state`} rows={24} value={state} onChange={setState} />}
         </div>
       </section>
     </div>

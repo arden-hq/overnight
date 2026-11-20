@@ -6,6 +6,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ScenarioSummary } from "../api/types";
 import { useCatalog } from "../lib/api";
+import { useDraftDirty } from "../lib/drafts";
 import { go, href, parse } from "../lib/router";
 import { adoptOperation, dismissOperation, runBlocker, startRun, stopRun, useOperation } from "../lib/operation";
 import { cn } from "@/lib/utils";
@@ -22,9 +23,10 @@ const lastLine = (text: string) =>
     .filter(Boolean)
     .at(-1) ?? "";
 
-export function RunButton({ scenario, dirty, compact }: { scenario: ScenarioSummary | undefined; dirty?: boolean; compact?: boolean }) {
+export function RunButton({ scenario, compact }: { scenario: ScenarioSummary | undefined; compact?: boolean }) {
   const { status } = useCatalog();
   const { operation } = useOperation();
+  const dirty = useDraftDirty(scenario?.id);
   const blocker = runBlocker(scenario, status, operation?.state === "running", dirty);
   const button = (
     <Button
