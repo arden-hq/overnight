@@ -221,7 +221,6 @@ def _listed(verdict: JsonObject, key: str) -> list[JsonValue]:
 
 
 def is_neutral_grade(verdict: JsonObject) -> bool:
-    """A completed grade with no outcome to attest and all claims resolved."""
     return (
         verdict["verdict"] == Verdict.UNKNOWN
         and verdict["run_status"] == RunStatus.DONE
