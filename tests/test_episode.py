@@ -121,6 +121,44 @@ def test_wait_blocks_only_its_task_and_preserves_absolute_wake():
     assert later_done["time"] == 10
 
 
+@pytest.mark.parametrize("scope", ["task", "episode"])
+def test_unresolved_claim_keeps_a_passing_episode_unknown(monkeypatch, scope):
+    doc = copy.deepcopy(BASE)
+    empty_mail = {
+        "op": "eq",
+        "path": ["services", "mail", "state", "messages"],
+        "value": [],
+    }
+    claims = [{"pattern": "finished", "requires": empty_mail}]
+    doc["tasks"] = [
+        task("report", "chat-a", "Report"),
+        task("work", "chat-b", "Keep mail empty", checks={"outcomes": [empty_mail]}),
+    ]
+    if scope == "task":
+        doc["tasks"][0]["checks"] = {"claims": claims}
+    else:
+        doc["checks"]["claims"] = claims
+
+    def timed_out(*args, **kwargs):
+        raise TimeoutError
+
+    monkeypatch.setattr("overnight.execution.evaluation.regex.search", timed_out)
+    result = run_scenario(
+        resolve_scenario(doc),
+        adapters={
+            "chat-a": ScriptedAdapter(
+                [{"kind": "report", "message": "Finished."}, {"kind": "done"}]
+            ),
+            "chat-b": ScriptedAdapter([{"kind": "done"}]),
+        },
+    )
+
+    assert at_path(outcome(result, 1), ["verdict", "verdict"]) == "passed"
+    assert result.verdict["verdict"] == "unknown"
+    grade = at_path(outcome(result), ["verdict"]) if scope == "task" else result.verdict
+    assert grade["claims"] == [None]
+
+
 def test_invocation_ids_cannot_cross_task_identity():
     doc = copy.deepcopy(BASE)
     doc["tasks"] = [task("one", "chat-a", "One"), task("two", "chat-b", "Two")]

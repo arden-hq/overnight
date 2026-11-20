@@ -28,7 +28,7 @@ from overnight.execution.adapters import (
     Training,
     make_adapter,
 )
-from overnight.execution.evaluation import evaluate
+from overnight.execution.evaluation import evaluate, is_neutral_grade
 from overnight.execution.harness import (
     HarnessAdapter,
     prepare_harness,
@@ -334,38 +334,14 @@ class Episode(Trial):
             connector_invalid=connector_invalid,
         )
         result.task_outcomes = [state.outcome for state in self.tasks if state.outcome is not None]
-        verdicts: list[Verdict] = []
-        for state, outcome in zip(self.tasks, result.task_outcomes, strict=True):
-            checks = state.config.checks
-            verdict = outcome["verdict"]
-            assert isinstance(verdict, dict)
-            if (
-                (state.status == "deadline" or not outcome["pending_approvals"])
-                and not outcome["pending_events"]
-                and not (checks.outcomes or checks.forbidden or checks.collateral)
-                and verdict["verdict"] != Verdict.FAILED
-            ):
-                continue
-            verdicts.append(Verdict(verdict["verdict"]))
-        global_neutral = (
-            self.status == RunStatus.DONE
-            and not (
-                self.config.checks.outcomes
-                or self.config.checks.forbidden
-                or self.config.checks.collateral
-            )
-            and not result.verdict["pending_events"]
-            and not result.verdict["pending_operator_steps"]
-            and not result.verdict["pending_approvals"]
-            and result.verdict["verdict"] != Verdict.FAILED
-        )
-        if not global_neutral or not verdicts:
-            verdicts.append(Verdict(result.verdict["verdict"]))
         graded = [
             verdict
             for verdict in (result.verdict, *(item["verdict"] for item in result.task_outcomes))
             if isinstance(verdict, dict)
         ]
+        verdicts = {
+            Verdict(grade["verdict"]) for grade in graded if not is_neutral_grade(grade)
+        } or {Verdict.UNKNOWN}
         proven_fail = any(_proven_fail(verdict) for verdict in graded)
         result.verdict["verdict"] = (
             Verdict.FAILED
