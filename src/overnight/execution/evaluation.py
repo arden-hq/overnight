@@ -182,6 +182,26 @@ def _listed(verdict: JsonObject, key: str) -> list[JsonValue]:
     return value if isinstance(value, list) else []
 
 
+def is_neutral_grade(verdict: JsonObject) -> bool:
+    """A completed grade with no outcome to attest and all claims resolved."""
+    return (
+        verdict["verdict"] == Verdict.UNKNOWN
+        and verdict["run_status"] == RunStatus.DONE
+        and all(_listed(verdict, "claims"))
+        and not any(
+            verdict[key]
+            for key in (
+                "outcomes",
+                "collateral",
+                "forbidden_trace_sequences",
+                "pending_events",
+                "pending_operator_steps",
+                "pending_approvals",
+            )
+        )
+    )
+
+
 def _with_task_verdicts(verdict: JsonObject, tasks: list[JsonObject] | None) -> list[JsonObject]:
     graded = [verdict]
     for task in tasks or []:
