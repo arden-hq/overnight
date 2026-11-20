@@ -522,6 +522,56 @@ def test_native_input_keeps_the_runner_open_after_the_parent_turn(tmp_path, work
     assert connector.reply({"kind": "done"}).status.pending
 
 
+def test_native_acp_startup_failure_is_infrastructure(tmp_path):
+    import sys
+
+    from test_runtime import BASE
+
+    from overnight.domain.contracts import HarnessRequirements
+    from overnight.execution.harness import HarnessAdapter
+    from overnight.execution.runtime import run_scenario
+    from overnight.execution.scenario import resolve_scenario
+
+    pytest.importorskip("acp")
+    child = tmp_path / "unavailable.py"
+    child.write_text(
+        """
+import asyncio
+import sys
+from pathlib import Path
+
+from overnight.adapters.acp import Connector
+from overnight.adapters.config import AdapterConfig, Factory
+from overnight.adapters.host import serve
+from overnight.execution.harness import Capabilities
+
+async def prepare(context):
+    raise AssertionError("test replaces unavailable native startup")
+
+class UnavailableConnector(Connector):
+    async def _start_resources(self, message):
+        raise OSError("native runtime is absent")
+
+async def main():
+    capabilities = Capabilities(simulated_clock=True, chat_isolation=True, cancel=True)
+    connector = UnavailableConnector(
+        AdapterConfig(factory="unused:adapter", evidence=Path(sys.argv[1])),
+        Factory(prepare=prepare, capabilities=capabilities),
+    )
+    await serve(capabilities, connector.observe, connector.lifecycle, connector.close)
+
+asyncio.run(main())
+"""
+    )
+    with HarnessAdapter(
+        [sys.executable, str(child), str(tmp_path / "native")], 4, None, HarnessRequirements()
+    ) as adapter:
+        result = run_scenario(resolve_scenario(BASE), adapter)
+    failure = result.verdict["failure"]
+    assert isinstance(failure, dict) and failure["kind"] == "infrastructure"
+    assert "native runtime is absent" in failure["message"]
+
+
 def test_chat_reset_cancels_old_calls_and_rebinds_native_session(tmp_path):
     pytest.importorskip("acp")
     from overnight.adapters.acp import Connector
@@ -854,6 +904,7 @@ def test_cancel_during_correlated_observe_is_acknowledged_by_the_real_connector(
             await asyncio.sleep(0.01)
 
         connector.connection = SimpleNamespace(prompt=prompt, cancel=native_cancel)
+        connector.resources_ready.set()
         connector.launch = _unused_launch(tmp_path, cancel=native_cleanup)
         connector.client.session_id = "native"
         connector.chat_id = "chat"
@@ -999,7 +1050,7 @@ def test_declared_capabilities_require_their_native_implementation(tmp_path):
     from overnight.adapters.acp import Connector
     from overnight.adapters.config import AdapterConfig, Factory
     from overnight.adapters.protocol import Observe
-    from overnight.execution.harness import Capabilities
+    from overnight.execution.harness import Capabilities, HarnessStartupError
 
     async def prepare(context):
         return _unused_launch(tmp_path)
@@ -1015,7 +1066,7 @@ def test_declared_capabilities_require_their_native_implementation(tmp_path):
             config, Factory(prepare=prepare, capabilities=Capabilities(steering=True))
         )
         try:
-            with pytest.raises(ValueError, match="steer hook"):
+            with pytest.raises(HarnessStartupError, match="steer hook"):
                 await connector.start(
                     Observe(kind="observe", chat_id="chat", observation={"operations": {}})
                 )

@@ -33,7 +33,13 @@ from overnight.adapters.protocol import Lifecycle, Observe, Steer
 from overnight.domain.contracts import JsonObject, action_contract
 from overnight.domain.values import json_object, json_value
 from overnight.execution.container import network_environment
-from overnight.execution.harness import ActionReply, Capabilities, HarnessStatus, LifecycleReply
+from overnight.execution.harness import (
+    ActionReply,
+    Capabilities,
+    HarnessStartupError,
+    HarnessStatus,
+    LifecycleReply,
+)
 from overnight.execution.tool_server import TrustedToolContext, WorldToolServer
 
 INSTRUCTIONS = """World services are reached only through the supplied world tools. Observations give
@@ -164,11 +170,17 @@ class Connector:
             await self.stack.aclose()
 
     async def start(self, message: Observe) -> None:
-        if self.resource_task is None:
-            self.resource_task = asyncio.create_task(self._own_resources(message))
-        await self.resources_ready.wait()
+        if not self.resources_ready.is_set():
+            if self.resource_task is None:
+                self.resource_task = asyncio.create_task(self._own_resources(message))
+            try:
+                async with asyncio.timeout(self.config.timeout_seconds):
+                    await self.resources_ready.wait()
+            except TimeoutError as error:
+                raise HarnessStartupError("native ACP session startup timed out") from error
         if self.resource_error is not None:
-            raise self.resource_error
+            error = self.resource_error
+            raise HarnessStartupError(f"native ACP session startup failed: {error}") from error
 
     async def new_session(self) -> None:
         assert self.connection is not None and self.launch is not None
@@ -192,11 +204,10 @@ class Connector:
     async def observe(self, message: Observe) -> ActionReply:
         if self.closed:
             raise ValueError("connector is closed")
+        await self.start(message)
+        if message.chat_id != self.chat_id:
+            raise ValueError("ACP connector cannot switch chats")
         async with asyncio.timeout(self.config.timeout_seconds):
-            if self.connection is None:
-                await self.start(message)
-            if message.chat_id != self.chat_id:
-                raise ValueError("ACP connector cannot switch chats")
             return await self.advance(message.observation)
 
     async def steer(self, message: Steer) -> None:

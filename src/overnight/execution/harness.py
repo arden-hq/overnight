@@ -13,6 +13,7 @@ from overnight.domain.contracts import (
     HarnessRequirements,
     JsonObject,
     Notification,
+    TrimmedText,
 )
 from overnight.execution.adapters import (
     NO_TRAINING,
@@ -59,6 +60,18 @@ class ActionReply(Contract):
     status: HarnessStatus
 
 
+class StartupFailed(Contract):
+    kind: Literal["startup_failed"]
+    message: TrimmedText
+
+
+observe_reply = TypeAdapter(ActionReply | StartupFailed)
+
+
+class HarnessStartupError(AdapterError):
+    """The native runtime did not start, before it could act on the observation."""
+
+
 class LifecycleReply(Contract):
     kind: Literal["reset", "cancel", "close"]
     scope: Literal["none", "process", "chat", "external"] = "none"
@@ -95,6 +108,7 @@ class HarnessAdapter(PersistentCommandAdapter):
         self.required = required
         self.capabilities: Capabilities | None = None
         self.status = HarnessStatus(pending=False)
+        self._started = False
         self.chat_id = "default"
         self.session_id = uuid4().hex
         self.active_turn: SteeringTarget | None = None
@@ -164,9 +178,14 @@ class HarnessAdapter(PersistentCommandAdapter):
                 self.active_turn = None
                 self._active_turn_changed.notify_all()
         try:
-            action = ActionReply.model_validate(reply)
+            action = observe_reply.validate_python(reply)
         except ValueError as error:
             raise AgentBehaviorError(f"invalid harness action reply: {error}") from error
+        if isinstance(action, StartupFailed):
+            if self._started:
+                raise AgentBehaviorError("harness reported startup failure after an action")
+            raise HarnessStartupError(action.message)
+        self._started = True
         self.status = action.status
         return action.action.model_dump(mode="json", exclude_unset=True)
 
@@ -234,6 +253,7 @@ class HarnessAdapter(PersistentCommandAdapter):
         if capabilities.reset_scope not in {"chat", "external"}:
             raise AdapterError("harness cannot reset native chat memory")
         self._lifecycle("reset", capabilities.reset_scope)
+        self._started = False
         self.status = HarnessStatus(pending=False)
         self.session_id = uuid4().hex
 

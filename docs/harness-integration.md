@@ -28,6 +28,10 @@ The runner sends `{"kind":"hello","version":1,"required":{...}}`; the connector 
 
 A missing capability fails before any world event or operator message.
 
+The first observation supplies the operation catalog for native startup. A startup failure
+returns `{"kind":"startup_failed","message":"..."}` instead of an action, with the same exchange
+ID when steering is enabled. The runner classifies it as infrastructure failure.
+
 Each observe request carries the bound `chat_id` and filtered observation. The response carries the action plus `status: {busy, pending, next_wake, delivered}`. Busy work blocks clock advancement, pending obligations block completion, and a future wake joins the earliest-event selection up to the horizon. `delivered` lists the notification ids the harness put in a native prompt during this exchange; they must come from this observation's `notifications`, and the world never offers them to the chat again.
 
 A harness's `done` means its native turn ended, not that its request is finished: the chat becomes idle. The runner does not guess what an idle harness wants. It observes the chat again only when a notification for it exists (another actor's mail or message to the agent, a change to something the agent can see, a due reminder, an operator message) or when the harness's native wake comes. While every chat is idle or blocked the runner moves the world from one scheduled time to the next; once nothing scheduled can reach an idle chat, its task completes as `done`. Idle time never costs steps. A `done` delivers every notification of that observation. A command agent's `done` is its own declaration and ends its task at once.

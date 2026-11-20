@@ -6,6 +6,8 @@ import { NativeState } from "./native-state.mjs"
 import { OperatorMessages } from "./operator-messages.mjs"
 import { ActionQueue, WorldBridge } from "./world-bridge.mjs"
 
+export class ArdenStartupError extends Error {}
+
 export class ArdenTrial {
   constructor(config, evidence) {
     this.config = config
@@ -73,7 +75,13 @@ export class ArdenTrial {
   }
 
   async observe(observation) {
-    if (this.time === undefined) await this.start(observation)
+    if (this.time === undefined) {
+      try {
+        await this.start(observation)
+      } catch (error) {
+        throw new ArdenStartupError(`Native Arden session startup failed: ${error?.message ?? error}`, { cause: error })
+      }
+    }
     else if (observation.time > this.time) await this.arden.moveClock(observation.time)
     else if (observation.time < this.time) throw new Error("World clock moved backwards")
     this.time = observation.time

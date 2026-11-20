@@ -11,8 +11,10 @@ from overnight.execution.adapters import MAX_RESPONSE_BYTES
 from overnight.execution.harness import (
     ActionReply,
     Capabilities,
+    HarnessStartupError,
     LifecycleReply,
     Ready,
+    StartupFailed,
     SteerAck,
 )
 
@@ -46,10 +48,16 @@ class _Router:
         self.steering_tasks: set[asyncio.Task[None]] = set()
         self.seen_steering_requests: set[str] = set()
 
+    async def observation_reply(self, message: Observe) -> ActionReply | StartupFailed:
+        try:
+            return await self.observe(message)
+        except HarnessStartupError as error:
+            return StartupFailed(kind="startup_failed", message=str(error))
+
     async def run_observe(self, message: Observe) -> None:
         target = (message.session_id, message.turn_id)
         try:
-            reply = await self.observe(message)
+            reply = await self.observation_reply(message)
             if self.active != target:
                 return
             self.active = None
@@ -147,7 +155,7 @@ class _Router:
         elif isinstance(message, Observe) and message.message_id is not None:
             await self.start_observe(message, tasks)
         elif isinstance(message, Observe):
-            await self.write(await self.observe(message), None)
+            await self.write(await self.observation_reply(message), None)
         else:
             return await self.run_lifecycle(message)
         return True
