@@ -206,7 +206,7 @@ An `invalid` run records `failure` in `verdict.json`, with two separate facts: w
 | `kind` | Where it failed |
 | --- | --- |
 | `agent` | The agent loop, for every kind of agent: its process or connector died, timed out or sent a reply that is not a JSON object |
-| `infrastructure` | Anywhere else: startup, cleanup or provenance. A harness that ends or times out before it answers the handshake with `ready` is a connector that could not start, since nothing the agent decides runs before then |
+| `infrastructure` | Anywhere else: startup, cleanup or provenance. Harness startup includes failure before `ready` and a native setup failure reported on the first observation. See [harness startup](harness-integration.md#control-protocol) |
 
 `failure.retryable` is true unless the setup cannot work, such as a command that cannot start or a missing capability. Exit codes 126 and 127 count as a command that could not run. A matched forbidden check or broken collateral check gives `failed` whatever happened afterwards, and such a run keeps its `failure` and is not retried. A false claim does not, because a claim is only judged in a finished run, so a run that died stays `invalid` and can be retried. Errors the agent can correct stay inside the run. A failed tool call returns as a result. A well-formed reply the world cannot accept, such as an unknown action, a reused invocation ID or a past `wait.until`, returns as a `failed` receipt with an `error`. The run continues, the turn counts toward `max_steps`, an `action_rejected` trace entry records it, and `verdict.json` counts `rejected_actions`.
 

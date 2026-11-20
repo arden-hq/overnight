@@ -91,10 +91,31 @@ OpenCode supports active-turn steering. Connectors without a simulated clock dec
 
 ## Run the common hard cases
 
-`examples/catering-harness.json` is a five-service case written as a plain user request: a vendor who replies later, an approval, an outage and retry, protected unrelated data and follow-up cleanup. Its operator is a persona that answers the agent's questions and approvals from a brief, so running it calls the operator model too. It runs Pi in its image by default. `scripts/prepare_open_harness_suite.py` writes a suite that runs Pi, OpenCode and Prime, each in its image, on this case, its overrides and variation, the shared-world episode, the three-day offsite case and the native capability fixtures, without running a model:
+`examples/catering-harness.json` is a five-service case written as a plain user request: a vendor who replies later, an approval, an outage and retry, protected unrelated data and follow-up cleanup. Its operator is a persona that answers the agent's questions and approvals from a brief, so running it calls the operator model too. It runs Pi in its image by default.
+
+### Run the open-harness suite
+
+The suite runs Pi, OpenCode, and Prime on the same cases, including catering, the shared-world episode, offsite, and the native capability fixtures. Each harness runs in its own container.
+
+Build the base and Pi images from the repository root:
+
+```sh
+docker build -f containers/agent-base/Dockerfile -t overnight-agent-base .
+docker build -f connectors/pi/Dockerfile -t overnight-pi .
+```
+
+Build [OpenCode](../connectors/opencode/README.md#container) and [Prime](../connectors/prime/README.md#image) from their source checkouts.
+
+Prepare and validate the suite without calling a model:
 
 ```sh
 uv run scripts/prepare_open_harness_suite.py --out .local/suites/open/suite.json
+overnight suite validate .local/suites/open/suite.json
+```
+
+The default endpoint uses `OPENROUTER_API_KEY`. Running the suite calls live models:
+
+```sh
 overnight suite run .local/suites/open/suite.json --out .local/suites/open/out
 ```
 
@@ -113,6 +134,8 @@ Every arm runs GPT-6 Luna through OpenRouter by default; `--base-url`, `--api-ke
 | 187200 | The colleague mails the final headcount, which the record and the summary need |
 
 Nothing wakes the agent between 86400 and 187200. It must come back on its own in the eight-hour window, through a reminder or a timed wait from the `system` service. The purchase needs the operator's approval, and the persona approves only the venue day once the agent has told it the price. Two outcome checks use `by` to require a quote request by 3600 and a Friday purchase by 133200. The case grades the final calendar for a single Friday offsite alongside the existing vendor review. Both the record and the one summary email must follow the headcount mail. The summary names the venue, date and final headcount. An agent that misses a time keeps partial credit for the outcomes it met. [Checks](scenario-format.md#checks) · [Scoring](suites.md#scoring)
+
+### Replay the offsite
 
 `examples/offsite-week-oracle.json` is the same world with a scripted oracle in place of the harness, and `examples/offsite-week-operator.jsonl` holds its authored operator answers, so the case is proven without a model:
 

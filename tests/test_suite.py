@@ -334,7 +334,6 @@ def test_suite_resume_cannot_admit_attempts_while_inputs_are_freezing(tmp_path, 
     report = run_suite(plan_suite(path), load_json(path), out, lambda *_: None)
     assert report.complete
 
-    # Archives from earlier releases can contain partially frozen inputs.
     (out / ".inputs" / "quit" / "only" / "scenario.json").unlink()
     with pytest.raises(ValueError):
         resume_suite(out, lambda *_: pytest.fail("resume admitted an attempt"))

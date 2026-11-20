@@ -91,11 +91,6 @@ def _write_private(path: Path, content: str) -> None:
 
 
 class _TraceFile:
-    """Appends each trace entry as one line while the run is in progress.
-
-    The run survives a failed write, since the runner turns an error raised inside a call into
-    a run failure; the first write error is kept and ``raise_write_error`` reports it."""
-
     def __init__(self, output: TextIO) -> None:
         self._output = output
         self._write_error: OSError | None = None

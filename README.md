@@ -1,172 +1,54 @@
 # Overnight
 
-Overnight evaluates agents in a simulated world.
+Overnight evaluates agents in a simulated workplace. A scenario defines people, permissions, starting data, timed events, and faults across mail, chat, calendar, shop, and records. The evaluator checks the final state and trace for task outcomes, forbidden actions, and collateral changes.
 
-A scenario sets up an operator, the agent under test, other people and a set of services: mail, chat, calendar, shop and records. It gives each service its starting state and sets permissions, scripted events and faults. The agent works through those services over simulated time. Overnight then grades the outcome, forbidden actions and collateral damage from the final state and an append-only trace.
-
-The agent can be a script, a plain command, or a native harness. A harness keeps its own agent loop. Overnight owns the world, the policy and the grading.
-
-## Install
-
-You need Python 3.14 and [uv](https://docs.astral.sh/uv/). From a checkout, install the `overnight` command:
-
-```sh
-uv tool install ".[acp]"
-```
-
-The examples below run from the checkout. The workbench UI also needs Node: `cd ui && npm install`. To work on Overnight itself, see [development](#development).
+The agent can be a script, a command, or a native harness. Native harnesses keep their own agent loop. Overnight owns the world, clock, and grading.
 
 ## Run a scripted example
 
-Scripted examples call no model and need no account.
+Install Python 3.14 and [uv](https://docs.astral.sh/uv/). From this checkout:
 
 ```sh
+uv tool install ".[acp]"
 overnight validate examples/catering-chaos.json
 overnight run examples/catering-chaos.json --out .local/runs/catering-chaos
 overnight inspect .local/runs/catering-chaos --kind result --limit 5
 ```
 
-`catering-chaos` uses five services. It has delayed replies, operator approvals, an outage and a retry, dependent events and protected unrelated data. `run` writes the resolved scenario, trace, final state, verdict and provenance into a new directory. It refuses a directory that already exists, and checks the operator model key before creating it.
+Catering exercises an approval, a delayed vendor reply, and a retry after an outage. It runs without an account or a model. Use a fresh output directory for each run. The directory contains the resolved scenario, trace, final state, verdict, and provenance. [Run evidence](docs/evidence.md)
 
-You can change the setup with `--overrides examples/catering-overrides.json`. You can add seeded noise and adversity with `--variation examples/catering-adversarial-variation.json`.
+To replay a persona operator without calling a model, use the recorded answers for the [three-day offsite](docs/harness-integration.md#replay-the-offsite) or [shared-world episode](docs/shared-world-episodes.md#examples).
 
-Several tasks can share one world. `examples/shared-world-chaos.json` runs three chats against one world with a scripted oracle. Its operator is an AI persona with a brief per task; here it replays authored answers instead of calling a model:
-
-```sh
-overnight run examples/shared-world-chaos.json \
-  --operator-answers examples/shared-world-chaos-operator.jsonl \
-  --out .local/runs/shared-world-chaos
-```
-
-See [shared-world episodes](docs/shared-world-episodes.md).
-
-`examples/offsite-week.json` is a three-day case: a venue that answers the next day, a booking that opens for eight hours with no message, a day change and a headcount that arrive by mail. `examples/offsite-week-oracle.json` is the same world with a scripted oracle:
+## Compare agents in a suite
 
 ```sh
-overnight run examples/offsite-week-oracle.json \
-  --operator-answers examples/offsite-week-operator.jsonl \
-  --out .local/runs/offsite-week-oracle
-overnight qa examples/offsite-week-oracle.json \
-  --operator-answers examples/offsite-week-operator.jsonl
-```
-
-## Run a suite
-
-A suite runs several agent setups (arms) on several scenarios (cases). It repeats attempts and reports paired confidence intervals.
-
-```sh
-overnight suite validate examples/suites/catering.json
 overnight suite qa examples/suites/catering.json
 overnight suite run examples/suites/catering.json --out .local/suites/catering
 ```
 
-See [suites](docs/suites.md).
+QA checks that the oracle can solve the case and that agents which skip the work fail its checks. A suite runs each agent setup against each case and reports scores and, with enough cases, paired confidence intervals. [Suites and scoring](docs/suites.md)
 
-## Run the open-harness suite
+The [open-harness suite](docs/harness-integration.md#run-the-open-harness-suite) runs Pi, OpenCode, and Prime in containers. Running it requires a provider key and calls live models. The [connector guide](docs/harness-integration.md#connectors) covers all five supported harnesses, including Arden and Feather.
 
-The open-harness suite runs Pi, OpenCode and Prime on the same hard cases. Each harness runs in its own container. The container cannot read the scenario or its checks, and it can reach only the model provider.
+## Open the workbench
 
-1. Build the images from the repository root. Start with the base image:
-
-   ```sh
-   docker build -f containers/agent-base/Dockerfile -t overnight-agent-base .
-   docker build -f connectors/pi/Dockerfile -t overnight-pi .
-   ```
-
-   OpenCode and Prime build from a checkout of their source. Their READMEs give the commands: [OpenCode](connectors/opencode/README.md#container), [Prime](connectors/prime/README.md#image).
-
-2. Write the suite file. This step runs no model.
-
-   ```sh
-   uv run scripts/prepare_open_harness_suite.py --out .local/suites/open/suite.json
-   overnight suite validate .local/suites/open/suite.json
-   ```
-
-   Every arm runs GPT-6 Luna through OpenRouter and reads `OPENROUTER_API_KEY`. To use another OpenAI-compatible endpoint, pass `--base-url`, `--api-key-env` (the name of the variable holding its key) and, if the endpoint needs one, `--reasoning-effort` ([model providers](docs/harness-integration.md#model-providers)). The operator persona of the catering, shared-world and offsite cases uses the same provider and model; the native fixtures use a scripted operator. `--arm` and `--case` pick a subset.
-
-3. Run it. This calls a real model and spends money.
-
-   ```sh
-   overnight suite run .local/suites/open/suite.json --out .local/suites/open/out
-   ```
-
-See [harness integration](docs/harness-integration.md) for the cases, isolation and budget bounds.
-
-## Workbench UI
+With Node.js 22.12 or newer, run:
 
 ```sh
-overnight serve      # API on 127.0.0.1:4174
-cd ui && npm run dev:web       # UI on http://localhost:5173
-cd ui && npm run dev           # both at once
+cd ui
+npm ci
+npm run dev
 ```
 
-The workbench lists scenarios from `examples/` and saved runs from `.local/runs/`. It shows a run on a timeline with its checks and evidence. It edits scenarios, starts and stops scripted runs, and compares two runs at their first difference.
+Open [localhost:5173](http://localhost:5173) to edit scenarios, start scripted runs, and inspect or compare timelines. The workbench binds its API to loopback. For command, harness, or persona runs, start the API with `overnight serve --allow-live` and the UI with `npm run dev:web`. Replay recorded operator answers from the CLI and open the saved run.
 
-The API binds to 127.0.0.1 only. It refuses other Host headers and cross-site writes. Saves are validated before they are written. By default only scripted agents with a scripted operator start; `serve --allow-live` also allows command and harness agents and persona operators, which may call a live model. The workbench does not replay recorded operator answers, so a persona scenario started there calls its model and needs its key. To replay one, such as `examples/shared-world-chaos.json`, run `overnight run --operator-answers ... --out .local/runs/<name>` and open the run in the workbench. Stopping a run, or the server, ends the run and every agent session it started.
+## Reference
 
-`npm run dev` starts the repository's `.venv/bin/overnight` when it exists, and otherwise `overnight` on PATH. After changing an API response model, run `npm run gen:api` in `ui/` to regenerate the TypeScript types; it reads the schema from the repository venv, so run `uv sync --extra acp` first. `npm run check:api` verifies them.
+- [Scenario format and exit codes](docs/scenario-format.md), [services](docs/services.md), and [scenario variations](docs/scenario-variations.md)
+- [Generated case families](docs/scenario-families.md) and [adapter authoring](docs/adapter-authoring.md)
+- [Training rollouts](docs/rollouts.md), [Verifiers](docs/verifiers.md), [OpenEnv and TRL](docs/openenv.md), and [Tinker](docs/tinker.md)
 
-## Exit codes
-
-| Code | Meaning |
-| --- | --- |
-| 0 | `passed` |
-| 1 | `failed`: a check failed |
-| 2 | `unknown`: a bound was reached or work is still pending |
-| 3 | `invalid`: the scenario is invalid, or the run failed before it could be graded |
-| 4 | Runtime or infrastructure error |
-| 64 | Usage or configuration error: a bad option, an existing `--out` or a missing operator model key. Nothing is run or written |
-
-## Connectors
-
-A native harness runs as `agent.kind: "harness"`. It talks to Overnight over one authenticated MCP tool server and a typed lifecycle protocol. Each connector is a separate package under `connectors/`.
-
-| Connector | Native runtime | Notes |
-| --- | --- | --- |
-| [Pi](connectors/pi/README.md) | Pi over ACP | Runs in the `overnight-pi` image; no scheduler |
-| [OpenCode](connectors/opencode/README.md) | Pinned OpenCode over ACP | Runs in the `overnight-opencode` image; native children, steering |
-| [Prime](connectors/prime/README.md) | Prime Agent over ACP | Runs in the `overnight-prime` image; native jobs through a pinned evaluation-runtime patch |
-| [Arden](connectors/arden/README.md) | Arden server and scheduler | Needs access to the Arden source: a built Arden checkout and a local Codex login. Runs on the host; native Automations on the world clock |
-| [Feather](connectors/feather/README.md) | Pinned Feather SDK | Runs on the host; `uv sync --extra feather` |
-
-`scripts/` prepares harness cases without running a model. Native runs call real models and need provider keys in the environment. A harness runs in a container, or on the host only when its scenario sets `run_on_host: true`. See [isolation](docs/harness-integration.md#isolation).
-
-## Architecture
-
-- The operator is the user: it sends messages, answers the agent's reports, decides approvals and controls execution policy. The common live cases play it with an AI persona and a private brief. Examples without a model, and the native fixtures that test a harness against a fixed decision, use a scripted one.
-- The agent proposes operations through an adapter. The runner binds its identity.
-- The world owns services, people, state, time, faults and events. Service handlers are pure and do no I/O.
-- Adapters own subprocesses, transport and file I/O.
-- One trace supports outcome, forbidden-action and collateral checks. Evaluator state never reaches the agent through the protocol, and a contained agent cannot read it from disk.
-
-`src/overnight/` has five packages. Imports flow toward `domain`:
-
-- `domain`: contracts and values
-- `services`: typed service operations, state and handlers
-- `world`: state, events, faults and access control
-- `execution`: scenario setup, agent transport, operator policy, runtime and evaluation
-- `adapters`: connector authoring, the ACP host, per-chat dispatch and the workbench API
-
-`cli.py` composes them.
-
-## Documentation
-
-- [Scenario format](docs/scenario-format.md): scenario fields, events, policy, agent protocol, checks and verdicts
-- [Services](docs/services.md): service kinds, operations and visibility
-- [Suites](docs/suites.md): repeated runs, arm comparison and statistics
-- [Run evidence](docs/evidence.md): artifacts, provenance and `overnight inspect`
-- [Shared-world episodes](docs/shared-world-episodes.md): several tasks in one world
-- [Scenario variations](docs/scenario-variations.md): seeded noise and authored adversity
-- [Scenario families](docs/scenario-families.md): generated cases with checks, an oracle and operator answers
-- [Training rollouts](docs/rollouts.md): the rollout worker that runs episodes with token capture for an outside trainer
-- [verifiers environment](docs/verifiers.md): generated families as a verifiers environment for prime-rl and other trainers
-- [OpenEnv and TRL](docs/openenv.md): generated families as OpenEnv loop-owning sessions for TRL's async GRPO, captured by OpenEnv's proxy
-- [Tinker environment](docs/tinker.md): generated families as tinker-cookbook RL environments
-- [Harness integration](docs/harness-integration.md): control protocol, capabilities and connectors
-- [Adapter authoring](docs/adapter-authoring.md): writing a connector, steering
-- [Test scope](docs/test-scope.md): what tests cover and how to run checks
-
-## Development
+## Develop
 
 ```sh
 uv sync --extra acp
@@ -176,8 +58,6 @@ uv sync --extra acp
 .venv/bin/ty check src/overnight
 ```
 
-None of these call a model or start Docker. See [test scope](docs/test-scope.md) for connector, container and UI checks, and [AGENTS.md](AGENTS.md) for contributor rules.
+The [test guide](docs/test-scope.md) lists the connector, trainer, container, and UI checks. After changing a workbench API model, run `npm run gen:api` in `ui/` and verify the generated schema with `npm run check:api`.
 
-## License
-
-Apache-2.0. See [LICENSE](LICENSE).
+[Apache-2.0](LICENSE)
