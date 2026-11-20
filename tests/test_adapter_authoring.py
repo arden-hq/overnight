@@ -500,26 +500,60 @@ def test_background_native_call_dispatches_after_parent_turn_without_another_pro
     asyncio.run(exercise())
 
 
-@pytest.mark.parametrize("work", ["continuation", "request"])
-def test_native_input_keeps_the_runner_open_after_the_parent_turn(tmp_path, work):
+@pytest.mark.parametrize("work", ["continuation", "request", "wake"])
+def test_native_work_is_admitted_after_a_textless_parent_turn(tmp_path, work):
     pytest.importorskip("acp")
+    from acp.schema import PromptResponse
+
     from overnight.adapters.acp import Connector
     from overnight.adapters.config import AdapterConfig, Factory, NativeObservation, NativeRequest
-    from overnight.execution.harness import Capabilities
+    from overnight.execution.harness import Capabilities, HarnessStatus
 
     async def unused_factory(context):
         raise AssertionError("no native startup is needed to project an obligation")
 
-    connector = Connector(
-        AdapterConfig(factory="external:adapter", evidence=tmp_path / "native"),
-        Factory(prepare=unused_factory, capabilities=Capabilities()),
-    )
-    connector.native = (
-        NativeObservation(continuation="Owned native child completed; its report is available.")
-        if work == "continuation"
-        else NativeObservation(request=NativeRequest(method="native/advance", params={}))
-    )
-    assert connector.reply({"kind": "done"}).status.pending
+    async def exercise():
+        connector = Connector(
+            AdapterConfig(factory="external:adapter", evidence=tmp_path / "native"),
+            Factory(prepare=unused_factory, capabilities=Capabilities()),
+        )
+        connector.bridge = ToolBridge("chat", connector.record)
+        connector.client.session_id = "native"
+
+        async def prompt(*, session_id, prompt):
+            assert "Owned native child" in prompt[0].text
+            connector.client.reply.append("continued")
+            return PromptResponse(stop_reason="end_turn")
+
+        async def ext_method(method, params):
+            assert method == "native/advance"
+            connector.client.reply.append("continued")
+            return {"stopReason": "end_turn"}
+
+        connector.connection = SimpleNamespace(prompt=prompt, ext_method=ext_method)
+        pending = {
+            "continuation": NativeObservation(continuation="Owned native child completed."),
+            "request": NativeObservation(request=NativeRequest(method="native/advance", params={})),
+            "wake": NativeObservation(status=HarnessStatus(pending=True, next_wake=30)),
+        }
+        updates = iter((pending[work], NativeObservation()))
+
+        async def after_turn(turn):
+            return next(updates)
+
+        connector.launch = _unused_launch(tmp_path, after_turn=after_turn)
+        connector.turn = asyncio.get_running_loop().create_future()
+        connector.turn.set_result(PromptResponse(stop_reason="end_turn"))
+        reply = await connector.advance({"time": 0, "notifications": [], "receipts": []})
+        if work == "wake":
+            assert reply.action.kind == "wait" and reply.action.until == 30
+            assert reply.status.pending
+        else:
+            assert reply.action.kind == "report" and reply.action.message == "continued"
+            assert not reply.status.pending
+        await connector.close()
+
+    asyncio.run(exercise())
 
 
 def test_native_acp_startup_failure_is_infrastructure(tmp_path):

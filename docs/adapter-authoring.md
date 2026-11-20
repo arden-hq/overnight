@@ -87,8 +87,9 @@ the observers. Surface invalid owned events through the connector's lifecycle ho
 A completed parent turn does not complete an active native child. Return truthful
 `pending`/`busy` status and supply `wait_for_activity` for runnable background work.
 The frontend races that wait against queued world calls, without another model prompt.
-A native scheduled wake is reported as `status.next_wake`; the host answers `wait` until
-that time, or `done` when it falls after the horizon. Waiting for the world itself goes
+A native scheduled wake is reported as `status.next_wake`. The host answers `wait` until
+that time. Beyond the horizon it waits for pending work and allows an idle chat to finish.
+Waiting for the world itself goes
 through the `system` tools, never through a native timer.
 
 ## Notifications and turns
@@ -103,9 +104,9 @@ tools and earlier results, and resending the observation each turn grows the nat
 past provider request limits. The host records the ids it
 prompted in `delivered_notifications`, reports them once in `status.delivered`, and never
 prompts the same id twice in a session; a chat reset clears that set. An observation that
-differs only in time or `as_of` starts no turn. When a turn ends without text and new
-notifications arrived meanwhile, the host starts the next turn at once; otherwise it answers
-`done`, and the runner treats the chat as idle until a notification for it exists.
+differs only in time or `as_of` starts no turn by itself. When a turn ends without text, the
+host checks for new notifications and remaining native work. It answers `done` when both
+are exhausted.
 
 Configuration:
 

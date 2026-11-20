@@ -226,42 +226,41 @@ class Connector:
             retry = self.bridge.resolve(observation["receipts"])
             if retry is not None:
                 return self.reply(retry)
-        while self.turn is None:
-            new = self.new_notifications(observation)
-            if self.native.request is not None:
-                self.start_native_request()
-            elif new or self.native.continuation is not None:
-                self.start_turn(observation, new)
-            else:
-                action = await self.idle_action(observation)
-                if action is not None:
-                    return self.reply(action)
-        return await self.run_turn(observation)
-
-    async def run_turn(self, observation: JsonObject) -> ActionReply:
-        assert self.bridge is not None
         while True:
-            assert self.turn is not None
-            action = asyncio.create_task(self.bridge.next_action())
-            try:
-                ready, _ = await asyncio.wait(
-                    (action, self.turn), return_when=asyncio.FIRST_COMPLETED
-                )
-                if action in ready:
-                    return self.reply(action.result())
+            if self.turn is not None:
+                action = await self.next_turn_effect()
+            else:
+                action = await self.advance_idle(observation)
+            if action is not None:
+                return self.reply(action)
+
+    async def advance_idle(self, observation: JsonObject) -> JsonObject | None:
+        if self.native.request is not None:
+            self.start_native_request()
+            return None
+        new = self.new_notifications(observation)
+        if new or self.native.continuation is not None:
+            self.start_turn(observation, new)
+            return None
+        return await self.idle_action(observation)
+
+    async def next_turn_effect(self) -> JsonObject | None:
+        assert self.bridge is not None
+        assert self.turn is not None
+        action = asyncio.create_task(self.bridge.next_action())
+        try:
+            ready, _ = await asyncio.wait((action, self.turn), return_when=asyncio.FIRST_COMPLETED)
+            if action in ready:
+                return action.result()
+            action.cancel()
+            await asyncio.gather(action, return_exceptions=True)
+            if not action.cancelled():
+                return action.result()
+            return await self.finish_turn()
+        finally:
+            if not action.done():
                 action.cancel()
                 await asyncio.gather(action, return_exceptions=True)
-                report = await self.finish_turn()
-            finally:
-                if not action.done():
-                    action.cancel()
-                    await asyncio.gather(action, return_exceptions=True)
-            if report is not None:
-                return self.reply(report)
-            new = self.new_notifications(observation)
-            if not new:
-                return self.reply({"kind": "done"})
-            self.start_turn(observation, new)
 
     def new_notifications(self, observation: JsonObject) -> list[JsonObject]:
         return [
@@ -307,6 +306,7 @@ class Connector:
     def start_native_request(self) -> None:
         assert self.native.request is not None and self.connection is not None
         request = self.native.request
+        self.native = self.native.model_copy(update={"request": None})
         self.client.reply.clear()
         self.client.metadata.clear()
         self.record(
@@ -332,6 +332,8 @@ class Connector:
     def start_turn(self, observation: JsonObject, new: list[JsonObject]) -> None:
         assert self.connection is not None and self.client.session_id is not None
         ids = [str(notification["id"]) for notification in new]
+        continuation = self.native.continuation
+        self.native = self.native.model_copy(update={"continuation": None})
         first = not self.session_prompted
         prompted = (
             {
@@ -369,7 +371,7 @@ class Connector:
                             if first
                             else ""
                         )
-                        + (self.native.continuation or "")
+                        + (continuation or "")
                         + "\n"
                         + json.dumps(prompted)
                     )
@@ -411,6 +413,8 @@ class Connector:
             self.launch.validate_turn(native_turn)
         if self.launch is not None and self.launch.after_turn is not None:
             self.native = await self.launch.after_turn(native_turn)
+        else:
+            self.native = NativeObservation()
         if self.bridge is not None and self.bridge.has_pending and not self.native.status.busy:
             raise RuntimeError("native turn ended with unresolved world operations")
         self.turn = None
