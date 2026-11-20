@@ -28,11 +28,11 @@ overnight suite run examples/suites/catering.json --out .local/suites/catering
 
 QA checks that the oracle can solve the case and that agents which skip the work fail its checks. A suite runs each agent setup against each case and reports scores and, with enough cases, paired confidence intervals. [Suites and scoring](docs/suites.md)
 
-The [open-harness suite](docs/harness-integration.md#run-the-common-hard-cases) runs Pi, OpenCode, and Prime in containers. Running it requires a provider key and calls live models. The [connector guide](docs/harness-integration.md#connectors) covers all five supported harnesses, including Arden and Feather.
+The [open-harness suite](docs/harness-integration.md#run-the-open-harness-suite) runs Pi, OpenCode, and Prime in containers. Running it requires a provider key and calls live models. The [connector guide](docs/harness-integration.md#connectors) covers all five supported harnesses, including Arden and Feather.
 
 ## Open the workbench
 
-With Node installed, run:
+With Node.js 22.12 or newer, run:
 
 ```sh
 cd ui
