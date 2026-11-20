@@ -24,10 +24,9 @@ const lastLine = (text: string) =>
     .at(-1) ?? "";
 
 export function RunButton({ scenario, compact }: { scenario: ScenarioSummary | undefined; compact?: boolean }) {
-  const { status } = useCatalog();
   const { operation } = useOperation();
   const dirty = useDraftDirty(scenario?.id);
-  const blocker = runBlocker(scenario, status, operation?.state === "running", dirty);
+  const blocker = runBlocker(scenario, operation?.state === "running", dirty);
   const button = (
     <Button
       variant={compact ? "ghost" : "outline"}

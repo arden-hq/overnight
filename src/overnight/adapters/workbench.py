@@ -164,6 +164,7 @@ class ScenarioSummary(ApiModel):
     valid: bool
     error: str | None
     agent_kind: str | None
+    run_blocker: str | None
     task_count: int
     service_kinds: list[str]
     people: int
@@ -665,8 +666,21 @@ def _replace_file(path: Path, content: bytes) -> None:
         os.close(directory)
 
 
+def _live_refusal(document: JsonValue, *, allow_live: bool) -> str | None:
+    fields = _obj(document)
+    kind = _str(_obj(fields.get("agent")).get("kind"))
+    persona = _obj(fields.get("operator")).get("persona") is not None
+    if allow_live or (kind in OFFLINE_AGENT_KINDS and not persona):
+        return None
+    reason = "Persona operators" if persona else f"{kind or 'This kind of'} agents"
+    return f"{reason} need overnight serve --allow-live"
+
+
 def _scenario_summary(
-    location: ScenarioLocation, entry: _ScenarioEntry, last_run: RunRef | None
+    location: ScenarioLocation,
+    entry: _ScenarioEntry,
+    last_run: RunRef | None,
+    config: WorkbenchConfig,
 ) -> ScenarioSummary:
     document = _obj(entry.document)
     checks = _obj(document.get("checks"))
@@ -680,6 +694,13 @@ def _scenario_summary(
         valid=entry.valid,
         error=entry.error,
         agent_kind=_str(_obj(document.get("agent")).get("kind")),
+        run_blocker=(
+            "The scenario file is invalid"
+            if not entry.valid
+            else "The server has no runs root to write to"
+            if not config.runs_roots
+            else _live_refusal(document, allow_live=config.allow_live)
+        ),
         task_count=len(tasks) if isinstance(tasks, list) else 0,
         service_kinds=sorted(
             {kind for item in services if (kind := _str(_obj(item).get("kind")))}
@@ -995,7 +1016,9 @@ class WorkbenchApi:
         return _json(
             ScenarioList(
                 scenarios=[
-                    _scenario_summary(location, entry, latest.get(entry.scenario_id or ""))
+                    _scenario_summary(
+                        location, entry, latest.get(entry.scenario_id or ""), self.config
+                    )
                     for location, entry in self.scenarios.scenarios()
                 ]
             )
@@ -1005,7 +1028,7 @@ class WorkbenchApi:
         latest = self._last_runs().get(entry.scenario_id or "")
         response = _json(
             ScenarioDetail(
-                summary=_scenario_summary(location, entry, latest),
+                summary=_scenario_summary(location, entry, latest, self.config),
                 scenario=entry.document,
                 services=service_views(entry.document, BUILTIN_SERVICES),
                 checks=scenario_checks(entry.document),
@@ -1057,13 +1080,12 @@ class WorkbenchApi:
                     422, "invalid_scenario", "scenario file is unreadable"
                 ) from error
             kind = _str(_obj(_obj(document).get("agent")).get("kind"))
-            persona = _obj(_obj(document).get("operator")).get("persona") is not None
-            if (kind not in OFFLINE_AGENT_KINDS or persona) and not self.config.allow_live:
+            refusal = _live_refusal(document, allow_live=self.config.allow_live)
+            if refusal is not None:
                 raise WorkbenchError(
                     403,
                     "live_refused",
-                    f"only scripted runs start here; {kind or 'this'} agents and persona "
-                    "operators may call a live model and need overnight serve --allow-live",
+                    refusal,
                     {"scenario": key, "agent_kind": kind},
                 )
             scenario_id = check_scenario(document).scenario_id
