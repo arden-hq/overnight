@@ -23,7 +23,7 @@ from overnight.domain.values import JsonObject
 from overnight.domain.vocabulary import RunStatus
 from overnight.execution.adapters import ScriptedAdapter
 from overnight.execution.evaluation import evaluate
-from overnight.execution.run_view import RunArtifacts, build_run_detail
+from overnight.execution.run_view import RunArtifacts, build_run_detail, first_divergence
 from overnight.execution.runtime import run_scenario
 from overnight.execution.scenario import load_json, resolve_scenario
 
@@ -529,6 +529,20 @@ def test_compare_marks_checks_whose_definitions_changed(workbench: tuple[Client,
     rows = client.get("/api/compare", params={"a": "0~group~catering", "b": "0~group~twin"})
     changed = [(c["layer"], c["index"]) for c in rows.json()["checks"] if c["definition_changed"]]
     assert changed == [("collateral", 0)]
+
+
+def test_comparison_covers_world_time_and_message_content():
+    baseline: JsonObject = {
+        "kind": "operator_message",
+        "time": 2,
+        "payload": {"time": 2, "message": "Book Thursday"},
+    }
+    for changed, field in (
+        ({**baseline, "time": 3, "payload": {"time": 3, "message": "Book Thursday"}}, "time"),
+        ({**baseline, "payload": {"time": 2, "message": "Book Friday"}}, "details"),
+    ):
+        _, divergence = first_divergence([(1, baseline)], [(1, changed)])
+        assert divergence is not None and divergence.fields == [field]
 
 
 def test_local_guard_refuses_other_hosts_and_cross_origin_writes(tmp_path: Path):

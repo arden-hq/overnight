@@ -698,17 +698,33 @@ class RunComparison(ApiModel):
     divergence: Divergence | None
 
 
-_COMPARED_FIELDS = ("kind", "actor", "operation", "args", "result")
+_OPERATION_FIELDS = ("service_id", "operation")
+_RESULT_FIELDS = ("status", "decision", "value", "error")
+_GROUPED_PAYLOAD_FIELDS = frozenset((*_OPERATION_FIELDS, "args", *_RESULT_FIELDS))
 
 
 def _signature(row: JsonObject) -> dict[str, JsonValue]:
-    payload = _obj(row.get("payload"))
+    raw_payload = row.get("payload")
+    payload = _obj(raw_payload)
+    kind = row.get("kind")
+    details: JsonValue = raw_payload
+    if isinstance(raw_payload, dict):
+        details = {
+            key: value
+            for key, value in payload.items()
+            if key not in _GROUPED_PAYLOAD_FIELDS
+            and (key != "evidence" or kind != "operator_answer")
+            and (key != "time" or not json_equal(value, row.get("time")))
+        }
     return {
-        "kind": row.get("kind"),
+        "kind": kind,
+        "time": row.get("time"),
         "actor": row.get("actor_id"),
-        "operation": [payload.get("service_id"), payload.get("operation")],
+        "context": [row.get("task_id"), row.get("chat_id")],
+        "operation": [payload.get(key) for key in _OPERATION_FIELDS],
         "args": payload.get("args"),
-        "result": [payload.get(key) for key in ("status", "decision", "value", "error")],
+        "result": [payload.get(key) for key in _RESULT_FIELDS],
+        "details": details,
     }
 
 
@@ -730,7 +746,7 @@ def first_divergence(
         return [
             (line, row)
             for line, row in trace
-            if isinstance(row, dict) and row.get("kind") not in VIEW_KINDS
+            if isinstance(row, dict) and _str(row.get("kind")) not in VIEW_KINDS
         ]
 
     left, right = stream(a), stream(b)
@@ -746,7 +762,7 @@ def first_divergence(
             )
         (line_a, row_a), (line_b, row_b) = left[position], right[position]
         sig_a, sig_b = _signature(row_a), _signature(row_b)
-        fields = [key for key in _COMPARED_FIELDS if not json_equal(sig_a[key], sig_b[key])]
+        fields = [key for key in sig_a if not json_equal(sig_a[key], sig_b[key])]
         if fields:
             return position, Divergence(
                 position=position, fields=fields, a=_step(line_a, row_a), b=_step(line_b, row_b)

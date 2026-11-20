@@ -15,7 +15,7 @@ import { GUTTER, RULER, Timeline } from "../components/Timeline";
 import { ToolCall } from "../components/ToolCall";
 import { Unavailable } from "../components/Unavailable";
 
-const FIELD_WORD: Record<string, string> = { kind: "step", actor: "actor", operation: "operation", args: "arguments", result: "result", presence: "presence" };
+const FIELD_WORD: Record<string, string> = { kind: "step", time: "time", actor: "actor", context: "task or chat", operation: "operation", args: "arguments", result: "result", details: "details", presence: "presence" };
 const SIDES = ["A", "B"] as const;
 
 export function Compare({ left, right }: { left: string; right: string }) {
