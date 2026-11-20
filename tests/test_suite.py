@@ -714,9 +714,12 @@ def test_stopping_a_parallel_suite_reaps_every_agent(tmp_path):
     agents = tmp_path / "agents"
     agents.mkdir()
     (tmp_path / "agent.py").write_text(
-        "import os, pathlib, sys, time\n"
+        "import json, os, pathlib, signal, sys, time\n"
         "sys.stdin.readline()\n"
-        "(pathlib.Path(sys.argv[1]) / str(os.getpid())).touch()\n"
+        "blocked = signal.pthread_sigmask(signal.SIG_BLOCK, [])\n"
+        "(pathlib.Path(sys.argv[1]) / str(os.getpid())).write_text(\n"
+        "    json.dumps([sig.name for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP) if sig in blocked])\n"
+        ")\n"
         "time.sleep(60)\n"
     )
     path = write_suite(
@@ -750,6 +753,7 @@ def test_stopping_a_parallel_suite_reaps_every_agent(tmp_path):
     assert process.wait(40) == 4
     for marker in agents.iterdir():
         assert_gone(int(marker.name))
+        assert json.loads(marker.read_text()) == []
     assert not json.loads((out / "report.json").read_text())["complete"]
 
 
