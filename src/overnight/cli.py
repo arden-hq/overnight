@@ -416,12 +416,6 @@ def _suite_exit(report: SuiteReport) -> int:
     return INFRASTRUCTURE_EXIT_CODE
 
 
-def _stop_on_hangup() -> None:
-    for number in (signal.SIGTERM, signal.SIGHUP):
-        if signal.getsignal(number) != signal.SIG_IGN:  # nohup asks to ignore the hangup.
-            signal.signal(number, signal.default_int_handler)
-
-
 def _echo_attempt(arm: str, case: str, attempt: int, retry: int, outcome: str) -> None:
     label = f"attempt {attempt} retry {retry}" if retry else f"attempt {attempt}"
     click.echo(f"{arm} {case} {label}: {outcome}", err=True)
@@ -443,7 +437,6 @@ CONCURRENCY = click.option(
 def suite_run(path: Path, out: Path, concurrency: int) -> int:
     """Run a suite and save every attempt plus the report in a new directory."""
     plan = plan_suite(path)
-    _stop_on_hangup()
     return _suite_exit(run_suite(plan, load_json(path), out, _echo_attempt, concurrency))
 
 
@@ -452,7 +445,6 @@ def suite_run(path: Path, out: Path, concurrency: int) -> int:
 @CONCURRENCY
 def suite_resume(out: Path, concurrency: int) -> int:
     """Continue a stopped suite, keeping every finished attempt."""
-    _stop_on_hangup()
     return _suite_exit(resume_suite(out, _echo_attempt, concurrency))
 
 

@@ -8,6 +8,7 @@ from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from types import FrameType
 from typing import BinaryIO
 
 import anyio
@@ -74,9 +75,26 @@ def _run_arguments(out: Path, arm_id: str, case_id: str) -> list[str]:
     return arguments
 
 
-def _ignore_signals() -> None:
-    for number in STOP_SIGNALS:
-        signal.signal(number, signal.SIG_IGN)
+@dataclass
+class _StopRequest:
+    requested: bool = False
+
+    def request(self, _number: int, _frame: FrameType | None) -> None:
+        self.requested = True
+
+
+@contextmanager
+def _stop_request() -> Generator[_StopRequest]:
+    stop = _StopRequest()
+    handlers = {number: signal.getsignal(number) for number in STOP_SIGNALS}
+    try:
+        for number, previous in handlers.items():
+            if previous != signal.SIG_IGN:
+                signal.signal(number, stop.request)
+        yield stop
+    finally:
+        for number, previous in handlers.items():
+            signal.signal(number, previous)
 
 
 @dataclass
@@ -253,7 +271,9 @@ def _next_retry(suite: Suite, out: Path, arm_id: str, case_id: str, attempt: int
     return len(tries) if _retries(tries) < suite.retries else None
 
 
-def _run_attempts(suite: Suite, out: Path, on_attempt: AttemptCallback, concurrency: int) -> None:
+def _run_attempts(
+    suite: Suite, out: Path, on_attempt: AttemptCallback, concurrency: int, stop: _StopRequest
+) -> None:
     queue = deque(
         (arm.id, case.id, attempt)
         for attempt in range(1, suite.attempts + 1)
@@ -263,19 +283,15 @@ def _run_attempts(suite: Suite, out: Path, on_attempt: AttemptCallback, concurre
     running: list[_Running] = []
     next_watch = 0.0
     try:
-        while queue or running:
-            while queue and len(running) < concurrency:
+        while (queue or running) and not stop.requested:
+            while queue and len(running) < concurrency and not stop.requested:
                 key = queue.popleft()
                 retry = _next_retry(suite, out, *key)
                 if retry is None:
                     continue
                 run_dir = _attempt_dir(out, *key, retry)
-                blocked = signal.pthread_sigmask(signal.SIG_BLOCK, STOP_SIGNALS)
-                try:
-                    process, log = _start_attempt(_run_arguments(out, key[0], key[1]), run_dir)
-                    running.append(_Running(key, retry, run_dir, ProcessTree(process), log))
-                finally:
-                    signal.pthread_sigmask(signal.SIG_SETMASK, blocked)
+                process, log = _start_attempt(_run_arguments(out, key[0], key[1]), run_dir)
+                running.append(_Running(key, retry, run_dir, ProcessTree(process), log))
             if not running:
                 continue
             time.sleep(POLL_SECONDS)
@@ -289,16 +305,15 @@ def _run_attempts(suite: Suite, out: Path, on_attempt: AttemptCallback, concurre
                 running.remove(run)
                 on_attempt(*run.key, run.retry, attempt_outcome(run.run_dir))
                 queue.appendleft(run.key)
-    except BaseException:
-        _ignore_signals()
-        for run in running:
-            if run.tree.process.poll() is None:
-                run.run_dir.with_suffix(STOPPED_SUFFIX).touch()
-        stop_trees([run.tree for run in running])
-        for run in running:
-            run.log.close()
-        anyio.run(sweep_containers)
-        raise
+    finally:
+        if running:
+            for run in running:
+                if run.tree.process.poll() is None:
+                    run.run_dir.with_suffix(STOPPED_SUFFIX).touch()
+            stop_trees([run.tree for run in running])
+            for run in running:
+                run.log.close()
+            anyio.run(sweep_containers)
 
 
 @contextmanager
@@ -312,20 +327,12 @@ def _exclusive(out: Path) -> Generator[None]:
 
 
 def _finish(suite: Suite, out: Path, on_attempt: AttemptCallback, concurrency: int) -> SuiteReport:
-    with _exclusive(out):
-        handlers = {number: signal.getsignal(number) for number in STOP_SIGNALS}
+    with _exclusive(out), _stop_request() as stop:
         try:
-            _run_attempts(suite, out, on_attempt, concurrency)
-        except KeyboardInterrupt:
-            pass
+            _run_attempts(suite, out, on_attempt, concurrency, stop)
         finally:
-            _ignore_signals()
-            try:
-                report = collect_report(suite, out)
-                replace_private_json(out / REPORT_FILE, report.model_dump(mode="json"), indent=2)
-            finally:
-                for number, handler in handlers.items():
-                    signal.signal(number, handler)
+            report = collect_report(suite, out)
+            replace_private_json(out / REPORT_FILE, report.model_dump(mode="json"), indent=2)
     return report
 
 
