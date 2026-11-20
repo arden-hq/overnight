@@ -32,7 +32,7 @@ base_url, key_env, model = sys.argv[1:4]
 provenance = pathlib.Path(os.environ["OVERNIGHT_PROVENANCE_PATH"])
 leaked = [name for name in ("FAKE_OPERATOR_KEY", "TINKER_API_KEY") if name in os.environ]
 provenance.write_text(json.dumps({
-    "implementation": "relay-agent",
+    "implementation": "relay-agent\u2028fixture",
     "code": {"git_commit": None, "sha256": "a" * 64, "version": None},
 }))
 

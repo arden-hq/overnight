@@ -530,8 +530,8 @@ class RecordedTransport:
     @classmethod
     def load(cls, path: Path) -> "RecordedTransport":
         try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-            entries = [json.loads(line) for line in lines if line.strip()]
+            with path.open(encoding="utf-8", newline="\n") as lines:
+                entries = [json.loads(line) for line in lines if line.strip()]
         except (OSError, ValueError) as error:
             raise ScenarioError(f"cannot read operator answers {path}: {error}") from error
         return cls.from_entries(entry for entry in entries if isinstance(entry, dict))

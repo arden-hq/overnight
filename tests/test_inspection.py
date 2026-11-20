@@ -27,7 +27,10 @@ def _entry(sequence: int, kind: str, **fields: object) -> dict[str, object]:
 
 
 def _write_trace(path: Path, entries: list[dict[str, object]]) -> None:
-    path.write_text("".join(json.dumps(entry) + "\n" for entry in entries), encoding="utf-8")
+    path.write_text(
+        "".join(json.dumps(entry, ensure_ascii=False) + "\n" for entry in entries),
+        encoding="utf-8",
+    )
 
 
 def test_query_validates_trace_and_combines_exact_filters(tmp_path: Path):
@@ -42,7 +45,7 @@ def test_query_validates_trace_and_combines_exact_filters(tmp_path: Path):
                 actor_id="agent",
                 task_id="one",
                 invocation_id="call",
-                payload={"status": "failed", "error": "offline"},
+                payload={"status": "failed", "error": "offline\u2028try later"},
             ),
             _entry(2, "result", actor_id="vendor", task_id="two", invocation_id="other"),
         ],
@@ -58,7 +61,7 @@ def test_query_validates_trace_and_combines_exact_filters(tmp_path: Path):
     assert result.records[0].line == 2
     payload = result.records[0].entry.payload
     assert isinstance(payload, Mapping)
-    assert payload["status"] == "failed"
+    assert payload == {"status": "failed", "error": "offline\u2028try later"}
 
 
 def test_malformed_trace_reports_line_and_does_not_skip(tmp_path: Path):

@@ -46,7 +46,9 @@ ENGINE_STREAM = (
 )
 
 
-def engine(received: list[dict], token_ids: bool = True) -> Starlette:
+def engine(
+    received: list[dict], token_ids: bool = True, *, generation_separator: str = "-"
+) -> Starlette:
 
     async def completions(request: Request) -> Response:
         body = json.loads(await request.body())
@@ -71,7 +73,7 @@ def engine(received: list[dict], token_ids: bool = True) -> Starlette:
         if said == "no logprobs":
             choice["logprobs"] = None
         completion = {
-            "id": f"gen-{len(received)}",
+            "id": f"gen{generation_separator}{len(received)}",
             "object": "chat.completion",
             "created": 1,
             "model": MODEL,
@@ -89,7 +91,9 @@ async def relay_calls(capture, requests: list[tuple[str, dict]], token_ids: bool
     received: list[dict] = []
     records: list[dict] = []
     answers: list[httpx.Response] = []
-    async with serve_http(engine(received, token_ids)) as upstream_url:
+    async with serve_http(
+        engine(received, token_ids, generation_separator="\u2028")
+    ) as upstream_url:
         budget = RequestBudget(input_usd_per_million=0.2, output_usd_per_million=0.75)
         provider = CompatibleProvider(base_url=f"{upstream_url}/v1", api_key_env="ENGINE_KEY")
         async with httpx.AsyncClient() as client:
@@ -158,7 +162,7 @@ def test_capture_stores_engine_tokens_and_replays_the_harness_stream(tmp_path):
     assert read_capture(capture).calls == [
         CapturedCall(
             request=number,
-            generation_id=f"gen-{number}",
+            generation_id=f"gen\u2028{number}",
             prompt_token_ids=[1, 2, 3, 4],
             completion_token_ids=[7, 8, 9],
             logprobs="returned",
