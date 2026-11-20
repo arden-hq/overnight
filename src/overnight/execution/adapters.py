@@ -252,7 +252,7 @@ class PersistentCommandAdapter(ManagedAdapter):
         self.capture_paths: list[Path] = []
         self._capture_folder: Path | None = None
         self.container_name: str | None = None
-        self._egress_log: Path | None = None
+        self._uses_egress = False
         self.image_id: str | None = None
         self._mounted: Path | None = None
         self._kept: Path | None = None
@@ -314,7 +314,7 @@ class PersistentCommandAdapter(ManagedAdapter):
             )
             self.provenance_paths.append(self._kept / "provenance.json")
         self.container_name = new_name()
-        self._egress_log = None
+        self._uses_egress = False
         capture = None
         if self.training.capture and self._kept is not None:
             self._capture_folder = Path(mkdtemp(prefix="overnight-capture-"))
@@ -327,7 +327,7 @@ class PersistentCommandAdapter(ManagedAdapter):
         network = "none"
         policy_port = self.training.policy_port
         if self.container.allow_hosts or policy_port is not None:
-            self._egress_log = folder / "egress.log"
+            self._uses_egress = True
             try:
                 network = await start_egress(self.container_name, self.container, policy_port)
             except ContainerUnavailable as error:
@@ -386,11 +386,19 @@ class PersistentCommandAdapter(ManagedAdapter):
     async def _remove_container(self) -> None:
         if self.container_name is None:
             return
-        # A killed docker client leaves its container running.
-        await remove_container(self.container_name)
-        if self._egress_log is not None:
-            await stop_egress(self.container_name, self._egress_log)
-        self.container_name = None
+        name, self.container_name = self.container_name, None
+        try:
+            # A killed docker client leaves its container running.
+            await remove_container(name)
+        finally:
+            try:
+                if self._uses_egress:
+                    log = self._kept.with_suffix(".egress.log") if self._kept is not None else None
+                    await stop_egress(name, log)
+            finally:
+                self._keep_container_evidence()
+
+    def _keep_container_evidence(self) -> None:
         try:
             if self._mounted is not None:
                 mounted, self._mounted = self._mounted, None

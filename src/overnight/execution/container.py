@@ -82,7 +82,8 @@ def keep_agent_folder(source: Path, target: Path) -> None:
         shutil.copytree(source, target, symlinks=True)
     except shutil.Error as error:
         lines = [f"{failed[0]}: {failed[2]}" for failed in error.args[0]]
-        (target / "copy-errors.txt").write_text("\n".join(lines) + "\n")
+        with target.with_suffix(".copy-errors.txt").open("x") as report:
+            report.write("\n".join(lines) + "\n")
 
 
 def own_folder(folder: Path) -> None:
@@ -237,13 +238,17 @@ async def start_egress(name: str, spec: AgentContainer, policy_port: int | None 
 
 async def stop_egress(name: str, log: Path | None) -> None:
     network, proxy = egress_names(name)
-    if log is not None:
-        with anyio.move_on_after(REMOVE_SECONDS), log.open("wb") as output:
-            await anyio.run_process(
-                [DOCKER, "logs", proxy], check=False, stdout=subprocess.DEVNULL, stderr=output
-            )
-    await remove(proxy)
-    await _remove_network(network)
+    try:
+        if log is not None:
+            with anyio.move_on_after(REMOVE_SECONDS), log.open("xb") as output:
+                await anyio.run_process(
+                    [DOCKER, "logs", proxy], check=False, stdout=subprocess.DEVNULL, stderr=output
+                )
+    finally:
+        try:
+            await remove(proxy)
+        finally:
+            await _remove_network(network)
 
 
 async def _remove_network(network: str) -> None:
