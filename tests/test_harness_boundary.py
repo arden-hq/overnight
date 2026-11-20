@@ -191,6 +191,30 @@ def test_an_idle_harness_is_woken_only_by_a_notification_for_it(tmp_path):
     assert (result.status, _observed_times(result)) == ("done", [0, 4])
 
 
+def test_explicit_delivery_cannot_idle_without_acknowledging_offered_input(tmp_path):
+    from test_runtime import BASE
+
+    from overnight.execution.runtime import run_scenario
+    from overnight.execution.scenario import resolve_scenario
+
+    capabilities = {"simulated_clock": True, "chat_isolation": True, "cancel": True}
+    omitted = "{'kind':'action','action':{'kind':'done'},'status':{'pending':False,'delivered':[]}}"
+    scenario = {
+        **BASE,
+        "operator": {
+            **BASE["operator"],
+            "steps": [{"at": 0, "kind": "message", "message": "Read new mail"}],
+        },
+    }
+    with HarnessAdapter(
+        _child(tmp_path, capabilities, omitted), 2, None, HarnessRequirements()
+    ) as adapter:
+        result = run_scenario(resolve_scenario(scenario), adapter)
+    failure = result.verdict["failure"]
+    assert isinstance(failure, dict) and failure["kind"] == "agent"
+    assert not any(entry["kind"] == "notification_delivered" for entry in result.trace)
+
+
 def test_harness_cannot_report_a_startup_failure_after_acting(tmp_path):
     from overnight.execution.adapters import AgentBehaviorError
 

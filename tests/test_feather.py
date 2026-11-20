@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 from collections import deque
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -47,6 +48,16 @@ def call(id, name, args):
     return {"id": id, "type": "function", "function": {"name": name, "arguments": json.dumps(args)}}
 
 
+def operator_message(id, time, message):
+    return {
+        "id": id,
+        "time": time,
+        "kind": "operator_message",
+        "service_id": None,
+        "summary": message,
+    }
+
+
 def observation(now=0, receipts=()):
     return {
         "time": now,
@@ -66,10 +77,56 @@ def observation(now=0, receipts=()):
             ]
         },
         "messages": [],
+        "notifications": [],
         "receipts": list(receipts),
         "world": {},
         "context": "test",
     }
+
+
+def test_idle_feather_delivers_a_new_world_notification_once(tmp_path):
+    async def exercise():
+        submitted = []
+
+        async def run(request):
+            submitted.append(json.loads(request.messages[-1].content))
+            return RunResult(
+                stop_reason="completed",
+                final_answer="",
+                num_turns=1,
+                compactions=0,
+                segments=(TraceSegment(kind="execution", input=request.messages, messages=()),),
+            )
+
+        async with AsyncOpenAI(api_key="unused") as client:
+            connector = Connector(client, "openai/gpt-5.4-mini", tmp_path, 100)
+            chat = Chat(
+                id="chat",
+                bridge=ToolBridge("chat", connector.record),
+                agent=SimpleNamespace(run=run),
+                finished=True,
+            )
+            connector.chats[chat.id] = chat
+            note = {
+                "id": "reminder",
+                "time": 5,
+                "kind": "reminder_due",
+                "service_id": "system",
+                "summary": "Check the venue",
+            }
+            message = Observe(
+                kind="observe",
+                chat_id=chat.id,
+                observation={**observation(5), "notifications": [note]},
+            )
+            first = await connector.observe(message)
+            second = await connector.observe(message)
+            assert [entry["notifications"][0]["id"] for entry in submitted] == ["reminder"]
+            assert first.status.delivered == ["reminder"] and second.status.delivered == []
+            assert first.action.kind == second.action.kind == "done"
+            await connector.close()
+
+    asyncio.run(exercise())
 
 
 def test_native_same_argument_calls_keep_distinct_ids_and_approval_continues(tmp_path):
@@ -201,7 +258,7 @@ def test_wake_preserves_native_history_and_chat_reset_drops_it(tmp_path):
                     assert waiting.action.kind == "wait"
                     assert waiting.status.pending and not waiting.status.busy
                     answered = observation(602)
-                    answered["messages"] = [{"time": 602, "message": "Proceed."}]
+                    answered["notifications"] = [operator_message("answer", 602, "Proceed.")]
                     await connector.observe(
                         Observe(kind="observe", chat_id="a", observation=answered)
                     )
@@ -422,8 +479,10 @@ def test_cancelled_pending_operation_keeps_native_chat_usable(tmp_path):
                     )
                     await connector.cancel(connector.chats["chat"])
                     resumed = observation(3)
-                    resumed["messages"] = [
-                        {"message": "The earlier task was cancelled. Write resumed."}
+                    resumed["notifications"] = [
+                        operator_message(
+                            "resume", 3, "The earlier task was cancelled. Write resumed."
+                        )
                     ]
                     next_action = await connector.observe(
                         Observe(kind="observe", chat_id="chat", observation=resumed)

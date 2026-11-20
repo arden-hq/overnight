@@ -21,6 +21,7 @@ export class ArdenTrial {
     this.arden = new ArdenProcess(config, this.evidence)
     this.native = new NativeState(config.databasePath, config.epochMs)
     this.actions = new ActionQueue()
+    this.delivered = []
     this.waitSince = 0
   }
 
@@ -97,7 +98,7 @@ export class ArdenTrial {
     }
     this.lastAction = undefined
     await this.bridge.settleDecisions(receipts)
-    await this.operator.submit(observation.messages ?? [], this.time, observation)
+    this.delivered = await this.operator.submit(observation)
     this.lastAction = await this.nextAction(observation.horizon)
     return this.lastAction
   }
@@ -196,7 +197,8 @@ export class ArdenTrial {
       pending:
         this.nativeBusy() || waiting || wake !== undefined ||
         this.bridge.calls.size > 0 || this.actions.items.length > 0,
-      next_wake: wake !== undefined && wake > this.time ? wake : null
+      next_wake: wake !== undefined && wake > this.time ? wake : null,
+      delivered: this.delivered
     }
     this.evidence.write("native_status", {
       time: this.time, native_next_wake: wake ?? null, ...status
