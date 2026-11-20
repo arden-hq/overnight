@@ -104,7 +104,7 @@ def _score_mean(cells: Sequence[Sequence[float | None]]) -> float | None:
     means: list[float] = []
     for cell in cells:
         values = [value for value in cell if value is not None]
-        if not values:
+        if not values or len(values) != len(cell):
             return None
         means.append(sum(values) / len(values))
     return sum(means) / len(means) if means else None

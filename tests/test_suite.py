@@ -178,6 +178,12 @@ def test_arm_score_averages_cases_and_ignores_unscored_attempts(tmp_path):
     assert unranked.arms[0].score is None
     assert unranked.arms[0].cases[1].scores == [None, 0.0]
 
+    incomplete_score = summarize_suite(
+        suite, outcomes, scores={**scores, ("a", "case-0"): [1.0, None]}
+    )
+    assert incomplete_score.arms[0].mean == report.arms[0].mean
+    assert incomplete_score.arms[0].score is None
+
     attempt = saved_attempt(tmp_path / "episode", "failed", outcomes=[True, False])
     (attempt / "task-outcomes.json").write_text(
         json.dumps([{"verdict": graded("failed", [True, True])}])
